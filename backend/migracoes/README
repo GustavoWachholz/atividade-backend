@@ -1,0 +1,3 @@
+Estrutura inicial do Alembic para um único banco, criada na página 10 da aula 7.
+Os comentários foram traduzidos; a configuração mantém o comportamento inicial.
+versions/ permanece vazia. A conexão aos modelos e ao banco começa na página 11.

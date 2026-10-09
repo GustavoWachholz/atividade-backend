@@ -1,0 +1,57 @@
+<svg viewBox="0 0 640 520" width="640" height="520" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+<title id="title">Cesta ilustrada de hortaliças</title>
+<desc id="desc">Ilustração em estilo cartoon de uma cesta marrom cheia de alface, cenouras, tomates e folhas verdes.</desc>
+<defs>
+ <linearGradient id="wood" x1="175" y1="280" x2="530" y2="469" gradientUnits="userSpaceOnUse"><stop stop-color="#D88A45"/><stop offset=".55" stop-color="#A65720"/><stop offset="1" stop-color="#824018"/></linearGradient>
+ <linearGradient id="leaf" x1="220" y1="20" x2="445" y2="289" gradientUnits="userSpaceOnUse"><stop stop-color="#A6CB67"/><stop offset="1" stop-color="#4D932C"/></linearGradient>
+ <linearGradient id="tomato" x1="370" y1="137" x2="506" y2="300"><stop stop-color="#F69358"/><stop offset=".5" stop-color="#D9432C"/><stop offset="1" stop-color="#B92D1F"/></linearGradient>
+ <linearGradient id="carrot" x1="188" y1="148" x2="269" y2="366"><stop stop-color="#FFCA72"/><stop offset=".48" stop-color="#F0892F"/><stop offset="1" stop-color="#CB591D"/></linearGradient>
+ <filter id="shadow" x="-30%" y="-30%" width="160%" height="180%"><feDropShadow dx="0" dy="18" stdDeviation="16" flood-color="#6A7B3A" flood-opacity=".23"/></filter>
+</defs>
+<ellipse cx="325" cy="468" rx="220" ry="25" fill="#9BAF76" opacity=".3"/>
+<g filter="url(#shadow)">
+<!-- Rear sprigs -->
+<path d="M322 224C304 155 296 96 306 40" stroke="#4C8428" stroke-width="10" stroke-linecap="round"/>
+<path d="M301 121C256 113 242 67 267 48C294 60 316 83 301 121Z" fill="#74B447" stroke="#235A1B" stroke-width="4"/>
+<path d="M309 85C337 64 352 36 345 15C308 19 293 47 309 85Z" fill="#75B849" stroke="#235A1B" stroke-width="4"/>
+<path d="M305 192C346 150 384 141 413 131" stroke="#4A8425" stroke-width="9" stroke-linecap="round"/>
+<path d="M348 165C344 121 366 96 397 103C401 138 381 156 348 165Z" fill="#72B14A" stroke="#235A1B" stroke-width="4"/>
+<path d="M264 228C236 159 215 116 170 94" stroke="#498222" stroke-width="9" stroke-linecap="round"/>
+<path d="M198 132C152 144 125 111 140 82C175 85 197 102 198 132Z" fill="#77B94A" stroke="#235A1B" stroke-width="4"/>
+<!-- Lettuce, top left -->
+<path d="M142 286C98 275 84 224 115 207C93 181 114 144 153 162C173 127 222 137 230 176C275 160 307 208 285 240C313 283 273 320 233 302C203 339 159 320 142 286Z" fill="url(#leaf)" stroke="#315F21" stroke-width="6" stroke-linejoin="round"/>
+<path d="M178 300C177 263 176 224 153 192M179 279C144 261 123 242 119 216M181 275C204 250 224 225 229 189M167 253C204 254 231 269 268 253" stroke="#E1EDB1" stroke-width="6" stroke-linecap="round" opacity=".8"/>
+<!-- Carrots -->
+<path d="M246 221C220 187 226 163 242 132C263 149 264 184 257 218" fill="#4E9C35" stroke="#28601A" stroke-width="4"/>
+<path d="M241 220C206 204 195 183 196 158C227 155 247 177 252 209" fill="#80BC51" stroke="#28601A" stroke-width="4"/>
+<path d="M260 216C265 170 287 154 310 155C308 186 293 209 265 225" fill="#77B348" stroke="#28601A" stroke-width="4"/>
+<path d="M224 213C232 201 271 195 283 221C299 257 252 342 237 371C222 341 198 247 224 213Z" fill="url(#carrot)" stroke="#9C4C1D" stroke-width="5"/>
+<path d="M238 240L252 231M227 267L242 257M250 288L265 278M238 313L251 304" stroke="#BC5A21" stroke-width="5" stroke-linecap="round" opacity=".56"/>
+<path d="M259 227C256 256 247 292 240 320" stroke="#FFE1A0" stroke-width="8" stroke-linecap="round" opacity=".65"/>
+<!-- Lettuce right -->
+<path d="M439 292C403 302 375 276 385 244C350 222 361 182 400 181C408 145 452 136 469 164C508 147 543 176 532 216C573 233 560 282 523 285C504 323 470 313 439 292Z" fill="#72B34A" stroke="#305E23" stroke-width="6"/>
+<path d="M456 296C451 251 444 213 448 171M454 258C417 246 396 229 388 204M457 263C490 246 511 224 521 207" stroke="#DFEFAD" stroke-width="6" stroke-linecap="round" opacity=".78"/>
+<!-- tomatoes -->
+<circle cx="362" cy="259" r="61" fill="url(#tomato)" stroke="#A53A25" stroke-width="6"/>
+<ellipse cx="343" cy="236" rx="16" ry="10" fill="#FFE8B3" opacity=".63" transform="rotate(-28 343 236)"/>
+<path d="M363 215C349 199 346 200 334 205L343 220L319 224L340 239L353 222L365 243L373 219L393 226L383 211L371 211L366 192Z" fill="#43862C" stroke="#285B1B" stroke-width="3" stroke-linejoin="round"/>
+<circle cx="479" cy="274" r="48" fill="url(#tomato)" stroke="#9E3725" stroke-width="5"/>
+<ellipse cx="465" cy="257" rx="12" ry="7" fill="#FFD9A2" opacity=".6" transform="rotate(-25 465 257)"/>
+<path d="M478 236L464 226L463 241L445 237L455 252L477 244L483 256L493 241L504 241L493 230L482 236L482 215" fill="#478A2C" stroke="#285B1B" stroke-width="3" stroke-linejoin="round"/>
+<!-- Basket handle -->
+<path d="M142 332C151 222 226 181 333 186C440 190 501 235 506 329" stroke="#86481E" stroke-width="22" stroke-linecap="round"/>
+<path d="M153 318C177 222 237 195 329 199" stroke="#E5B078" stroke-width="8" stroke-linecap="round" opacity=".78"/>
+<!-- Basket -->
+<path d="M126 305C126 287 145 279 161 284C262 301 390 306 493 280C516 274 530 287 525 307L493 441C489 460 473 472 453 474L208 474C186 472 174 462 169 444L126 305Z" fill="url(#wood)" stroke="#774019" stroke-width="7" stroke-linejoin="round"/>
+<path d="M141 320C242 342 400 342 509 308" stroke="#E9A66D" stroke-width="11" stroke-linecap="round" opacity=".62"/>
+<path d="M171 366C273 393 408 389 511 349M184 421C278 444 392 438 498 399" stroke="#783C19" stroke-width="13" stroke-linecap="round" opacity=".46"/>
+<path d="M211 338L236 471M289 341L297 475M368 338L362 475M445 320L427 467" stroke="#78411B" stroke-width="13" opacity=".5"/>
+<path d="M142 312C244 339 413 334 508 306" stroke="#8B481D" stroke-width="13" stroke-linecap="round"/>
+<path d="M196 359C199 395 207 421 216 441" stroke="#F2BE83" stroke-width="9" stroke-linecap="round" opacity=".5"/>
+<path d="M276 362L282 416" stroke="#F2BE83" stroke-width="9" stroke-linecap="round" opacity=".45"/>
+</g>
+<!-- small ambient elements -->
+<path d="M86 143L99 126M81 170L62 168M560 121L571 102M571 141L595 135" stroke="#81B957" stroke-width="7" stroke-linecap="round"/>
+<circle cx="550" cy="348" r="7" fill="#A5C76E"/>
+<circle cx="84" cy="362" r="5" fill="#A5C76E"/>
+</svg>
