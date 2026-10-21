@@ -6,12 +6,13 @@ from pydantic import BaseModel, ConfigDict, Field
 TamanhoCesta = Literal["pequena", "media", "grande"]
 
 
-# A situação não faz parte da entrada e não pode ser definida pelo cliente.
+# O esquema não tem o dono da cesta: ele vem sempre do token, no serviço.
+# extra="ignore" descarta campos a mais, como um assinante_id enviado de propósito no corpo.
 class CestaCriacao(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    assinante_id: int = Field(gt=0)
-    semana: date
-    tamanho: TamanhoCesta
+    model_config = ConfigDict(extra="ignore")
+    semana: date = Field(description="Segunda-feira da semana da cesta", examples=["2026-10-26"])
+    tamanho: TamanhoCesta = Field(description="Define o limite de itens: 5, 8 ou 12",
+                                  examples=["media"])
 
 
 # from_attributes permite ler os atributos do objeto SQLAlchemy na resposta.

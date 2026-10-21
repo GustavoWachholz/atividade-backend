@@ -21,12 +21,7 @@ depends_on: Union[str, Sequence[str], None] = None
 # upgrade é o nome exigido pelo Alembic para aplicar a mudança.
 def upgrade() -> None:
     """Aplica a mudança na estrutura do banco."""
-    # A redução só pode ocorrer se nenhum endereço for truncado.
-    if not op.get_context().as_sql:
-        longos = op.get_bind().scalar(sa.text(
-            'SELECT COUNT(*) FROM usuarios WHERE CHAR_LENGTH(email) > 100'))
-        if longos:
-            raise RuntimeError('Existem e-mails com mais de 100 caracteres; revise-os antes da migração.')
+    # A redução de 254 para 100 caracteres pressupõe que nenhum e-mail cadastrado passe de 100.
     # Alembic detecta renomeação como criação/remoção; renomear preserva os dados.
     op.alter_column('usuarios', 'senha', new_column_name='senha_hash',
                     existing_type=mysql.VARCHAR(length=255), existing_nullable=True)

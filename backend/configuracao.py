@@ -9,3 +9,10 @@ URL_DO_BANCO = os.getenv("URL_DO_BANCO")
 # A URL de testes aponta para um MySQL separado, nunca para os dados do projeto.
 URL_DO_BANCO_TESTE = os.getenv("URL_DO_BANCO_TESTE")
 ORIGEM_FRONTEND = os.getenv("ORIGEM_FRONTEND", "http://localhost:5173")
+
+
+# obter_configuracao reúne os valores que o seguranca.py precisa sem importar variáveis soltas.
+def obter_configuracao():
+    return {
+        "chave_do_token": os.getenv("CHAVE_DO_TOKEN"),
+    }

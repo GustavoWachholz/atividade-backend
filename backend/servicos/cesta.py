@@ -1,34 +1,35 @@
 from esquemas.cesta import CestaResposta
 from repositorios import cesta as repositorio_cesta
-from repositorios import usuario as repositorio_usuario
 
 # A capacidade é regra de negócio e não uma coluna da tabela.
 LIMITES = {"pequena": 5, "media": 8, "grande": 12}
 
 
-# A ausência retorna None; recusas retornam uma mensagem para a rota avaliar.
-def criar(sessao, dados):
-    assinante = repositorio_usuario.buscar_por_id(sessao, dados.assinante_id)
-    if assinante is None:
-        return None
-    if assinante.tipo != "assinante":
-        return "A cesta deve pertencer a um usuário do tipo assinante."
-    return repositorio_cesta.salvar(sessao, {**dados.model_dump(), "situacao": "pedida"})
+# O dono da cesta vem do token: a rota já exigiu o perfil assinante com exigir_assinante.
+def criar(sessao, dados, usuario):
+    return repositorio_cesta.salvar(sessao, {
+        "assinante_id": usuario.id,
+        "semana": dados.semana,
+        "tamanho": dados.tamanho,
+        "situacao": "pedida",
+    })
 
 
-# O serviço encaminha os filtros sem acessar os dados diretamente.
-def listar(sessao, tamanho=None, assinante_id=None, pagina=1):
+# A assinante vê só as cestas dela; o produtor vê todas e pode filtrar por assinante.
+def listar(sessao, usuario, tamanho=None, assinante_id=None, pagina=1):
+    if usuario.tipo == "assinante":
+        return repositorio_cesta.listar(sessao, tamanho, usuario.id, pagina)
     return repositorio_cesta.listar(sessao, tamanho, assinante_id, pagina)
 
 
-# Os campos de capacidade são calculados a partir de todos os produtos da cesta.
+# Devolve o objeto do modelo, ou None para a rota responder 404.
 def buscar_por_id(sessao, cesta_id):
-    cesta = repositorio_cesta.buscar_por_id(sessao, cesta_id)
-    if cesta is None:
-        return None
-    # relationship permite ler os produtos associados sem filtrar uma lista em memória.
-    produtos = cesta.produtos_separados
-    ocupado = sum(produto.quantidade for produto in produtos)
+    return repositorio_cesta.buscar_por_id(sessao, cesta_id)
+
+
+# Os campos de capacidade são calculados a partir de todos os produtos da cesta.
+def detalhar(cesta):
+    ocupado = sum(produto.quantidade for produto in cesta.produtos_separados)
     limite = LIMITES[cesta.tamanho]
     return {
         **CestaResposta.model_validate(cesta).model_dump(),

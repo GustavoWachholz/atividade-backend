@@ -35,3 +35,9 @@ class UsuarioResposta(BaseModel):
     email: EmailStr | None = None
     # Senha não integra a resposta, mesmo quando houver um hash no banco.
     criado_em: datetime
+
+
+# O /login devolve um token JWT com esses dois campos, padrão OAuth2.
+class Token(BaseModel):
+    access_token: str
+    token_type: str

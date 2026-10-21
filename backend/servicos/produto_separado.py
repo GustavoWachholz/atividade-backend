@@ -1,25 +1,22 @@
-from repositorios import cesta as repositorio_cesta
 from repositorios import produto_separado as repositorio_produto
 from servicos.cesta import LIMITES
+from servicos.excecoes import LimiteDaCestaExcedido
 
 
-# Diferencia uma cesta inexistente de uma cesta existente sem produtos.
-def listar_por_cesta(sessao, cesta_id):
-    cesta = repositorio_cesta.buscar_por_id(sessao, cesta_id)
-    if cesta is None:
-        return None
+# A cesta chega já conferida pela rota (existe e pode ser vista por quem pediu).
+def listar_por_cesta(cesta):
     return cesta.produtos_separados
 
 
-# A regra muda o objeto sem gravar; o repositório confirma cesta e produto juntos.
-def separar(sessao, cesta_id, dados):
-    cesta = repositorio_cesta.buscar_por_id(sessao, cesta_id)
-    if cesta is None:
-        return None
+# A regra da cartilha: a soma das quantidades não passa do limite do tamanho,
+# e o primeiro produto muda a situação. O repositório grava cesta e produto num commit só.
+def separar(sessao, cesta, dados):
     produtos = cesta.produtos_separados
     ocupado = sum(produto.quantidade for produto in produtos)
-    if ocupado + dados.quantidade > LIMITES[cesta.tamanho]:
-        return "A quantidade informada ultrapassa o limite da cesta."
+    restante = LIMITES[cesta.tamanho] - ocupado
+    if dados.quantidade > restante:
+        raise LimiteDaCestaExcedido(
+            f"A quantidade passa do limite da cesta. Cabem só mais {restante} itens.")
     if not produtos and cesta.situacao == "pedida":
         cesta.situacao = "em_separacao"
-    return repositorio_produto.salvar(sessao, cesta_id, dados.model_dump())
+    return repositorio_produto.salvar(sessao, cesta.id, dados.model_dump())

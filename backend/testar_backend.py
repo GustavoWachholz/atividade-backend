@@ -21,12 +21,14 @@ from modelos.usuario import Usuario
 from esquemas.usuario import UsuarioCriacao
 from repositorios import usuario as repositorio_usuario
 from servicos import usuario as servico_usuario
-from servicos.excecoes import EmailEmUso
-from security import verificar_senha
+from servicos.excecoes import EmailEmUso, LimiteDaCestaExcedido
+from seguranca import criar_token, ler_token, verificar_senha
+from rotas.autenticacao import obter_usuario_atual, exigir_assinante, exigir_produtor
 from sqlalchemy.exc import IntegrityError
 from repositorios import cesta as repositorio_cesta
 from repositorios import produto_separado as repositorio_produto
 from servicos import cesta as servico_cesta
+from servicos import produto_separado as servico_produto
 
 
 # Um MySQL vazio e exclusivo isola os testes sem trocar o banco ensinado na aula.
@@ -58,6 +60,9 @@ class TestesBackend(unittest.TestCase):
                 yield sessao
 
         app.dependency_overrides[obter_sessao] = sessao_teste
+        # Define usuário autenticado padrão (produtor) para consultas gerais
+        self.usuario_atual = Usuario(id=99, nome="Vanderlei", tipo="produtor", email="produtor@example.com")
+        app.dependency_overrides[obter_usuario_atual] = lambda: self.usuario_atual
         self.addCleanup(app.dependency_overrides.clear)
         self.cliente = TestClient(app)
         self.addCleanup(self.cliente.close)
@@ -73,17 +78,24 @@ class TestesBackend(unittest.TestCase):
         self.assertEqual(resposta.json()["tipo"], tipo)
         return resposta.json()["id"]
 
-    # Cria uma cesta válida para os testes de capacidade e consulta.
+    # Cria uma cesta válida. O assinante_id falso no corpo deve ser ignorado: o dono vem do token.
     def criar_cesta(self, assinante_id, tamanho="pequena"):
+        app.dependency_overrides[obter_usuario_atual] = lambda: Usuario(
+            id=assinante_id, nome="Aline", tipo="assinante", email=f"aline{assinante_id}@example.com"
+        )
         resposta = self.cliente.post("/cestas", json={
-            "assinante_id": assinante_id, "semana": "2026-10-05", "tamanho": tamanho
+            "assinante_id": 999, "semana": "2026-10-05", "tamanho": tamanho
         })
+        # Restaura para o produtor para os próximos passos
+        app.dependency_overrides[obter_usuario_atual] = lambda: self.usuario_atual
         self.assertEqual(resposta.status_code, 201)
         self.assertEqual(resposta.json()["situacao"], "pedida")
+        self.assertEqual(resposta.json()["assinante_id"], assinante_id)
         return resposta.json()["id"]
 
     # Evita duplicar a montagem da requisição de separação.
     def separar(self, cesta_id, quantidade):
+        app.dependency_overrides[obter_usuario_atual] = lambda: self.usuario_atual
         return self.cliente.post(f"/cestas/{cesta_id}/produtos", json={
             "nome_produto": "Alface", "quantidade": quantidade
         })
@@ -94,9 +106,10 @@ class TestesBackend(unittest.TestCase):
         self.criar_usuario("produtor")
         resposta = self.cliente.post("/usuarios", json={"nome": "Ana", "tipo": "outro"})
         self.assertEqual(resposta.status_code, 422)
-        usuarios = self.cliente.get("/usuarios").json()
-        self.assertEqual(len(usuarios), 2)
-        self.assertEqual(len(self.cliente.get("/usuarios?tipo=produtor").json()), 1)
+        with self.Sessao() as sessao:
+            self.assertEqual(len(sessao.query(Usuario).all()), 2)
+        # A lista pública de usuários foi retirada: ela expunha o e-mail de todo mundo.
+        self.assertEqual(self.cliente.get("/usuarios").status_code, 405)
 
     def test_email_unico_e_senha_em_hash(self):
         dados = {"nome": "Ana", "tipo": "assinante", "email": "ANA@example.com", "senha": "teste1234"}
@@ -120,11 +133,14 @@ class TestesBackend(unittest.TestCase):
         assinante = self.criar_usuario()
         produtor = self.criar_usuario("produtor")
         cesta = self.criar_cesta(assinante)
-        for usuario_id, codigo in [(produtor, 409), (999, 404)]:
-            resposta = self.cliente.post("/cestas", json={
-                "assinante_id": usuario_id, "semana": "2026-10-05", "tamanho": "media"
-            })
-            self.assertEqual(resposta.status_code, codigo)
+        # Testar tentativa com perfil produtor (deve retornar 403)
+        app.dependency_overrides[obter_usuario_atual] = lambda: Usuario(
+            id=produtor, nome="Produtor", tipo="produtor", email="produtor@example.com"
+        )
+        resposta = self.cliente.post("/cestas", json={"semana": "2026-10-05", "tamanho": "media"})
+        self.assertEqual(resposta.status_code, 403)
+
+        app.dependency_overrides[obter_usuario_atual] = lambda: self.usuario_atual
         self.assertEqual(len(self.cliente.get("/cestas").json()), 1)
         detalhe = self.cliente.get(f"/cestas/{cesta}").json()
         self.assertEqual(detalhe["quantidade_ocupada"], 0)
@@ -180,8 +196,11 @@ class TestesBackend(unittest.TestCase):
     # Entradas inválidas e situação enviada pelo cliente não devem gerar dados.
     def test_entradas_invalidas(self):
         assinante = self.criar_usuario()
-        dados = {"assinante_id": assinante, "semana": "2026-10-05", "tamanho": "pequena"}
-        for mudanca in [{"tamanho": "gigante"}, {"semana": "invalida"}, {"situacao": "pedida"}]:
+        app.dependency_overrides[obter_usuario_atual] = lambda: Usuario(
+            id=assinante, nome="Aline", tipo="assinante", email=f"aline{assinante}@example.com"
+        )
+        dados = {"semana": "2026-10-05", "tamanho": "pequena"}
+        for mudanca in [{"tamanho": "gigante"}, {"semana": "invalida"}]:
             self.assertEqual(self.cliente.post("/cestas", json={**dados, **mudanca}).status_code, 422)
         cesta = self.criar_cesta(assinante)
         for quantidade in [0, -1, 1.5, True, "2"]:
@@ -231,13 +250,15 @@ class TestesBackend(unittest.TestCase):
         esperados = []
         for indice in range(23):
             semana = "2026-10-12" if indice % 2 == 0 else "2026-10-05"
-            resposta = self.cliente.post("/cestas", json={
-                "assinante_id": assinante, "semana": semana, "tamanho": "media"
-            })
+            app.dependency_overrides[obter_usuario_atual] = lambda: Usuario(
+                id=assinante, nome="Aline", tipo="assinante", email=f"aline{assinante}@example.com"
+            )
+            resposta = self.cliente.post("/cestas", json={"semana": semana, "tamanho": "media"})
             self.assertEqual(resposta.status_code, 201)
             esperados.append((semana, resposta.json()["id"]))
         esperados.sort()
         recebidos = []
+        app.dependency_overrides[obter_usuario_atual] = lambda: self.usuario_atual
         for pagina, quantidade in [(1, 10), (2, 10), (3, 3), (4, 0)]:
             resposta = self.cliente.get(f"/cestas?assinante_id={assinante}&tamanho=media&pagina={pagina}")
             self.assertEqual(resposta.status_code, 200)
@@ -248,6 +269,11 @@ class TestesBackend(unittest.TestCase):
 
 # Estes testes validam SQL e HTTP sem substituir MySQL por outro banco.
 class TestesSemConexao(unittest.TestCase):
+    def setUp(self):
+        self.usuario_teste = Usuario(id=1, nome="Vanderlei", tipo="produtor", email="vanderlei@example.com")
+        app.dependency_overrides[obter_usuario_atual] = lambda: self.usuario_teste
+        self.addCleanup(app.dependency_overrides.clear)
+
     def test_normalizacao_email_preserva_senha(self):
         dados = UsuarioCriacao(nome=" Ana ", tipo="assinante", email=" ANA@example.com ", senha=" teste1234 ")
         self.assertEqual(dados.email, "ana@example.com")
@@ -257,13 +283,13 @@ class TestesSemConexao(unittest.TestCase):
     def test_senha_nunca_aparece_na_resposta(self):
         usuario = Usuario(id=1, nome="Ana", tipo="assinante", email="ana@example.com",
                           senha_hash="hash-reservado", criado_em=datetime(2026, 10, 7))
+        app.dependency_overrides[obter_usuario_atual] = lambda: usuario
         with TestClient(app) as cliente:
-            with patch.object(servico_usuario, "listar", return_value=[usuario]):
-                resposta = cliente.get("/usuarios")
-                self.assertEqual(resposta.status_code, 200)
-                self.assertNotIn("senha", resposta.json()[0])
-                self.assertNotIn("senha_hash", resposta.json()[0])
-                self.assertNotIn("hash-reservado", resposta.text)
+            resposta = cliente.get("/usuarios/eu")
+            self.assertEqual(resposta.status_code, 200)
+            self.assertNotIn("senha", resposta.json())
+            self.assertNotIn("senha_hash", resposta.json())
+            self.assertNotIn("hash-reservado", resposta.text)
             with patch.object(servico_usuario, "cadastrar", return_value=usuario):
                 resposta = cliente.post("/usuarios", json={"nome": "Ana", "tipo": "assinante", "email": "ana@example.com", "senha": "teste1234"})
                 self.assertEqual(resposta.status_code, 201)
@@ -330,15 +356,17 @@ class TestesSemConexao(unittest.TestCase):
                 self.assertTrue(verificar_senha(dados.senha, enviados["senha_hash"]))
                 self.assertFalse(verificar_senha("senha-errada", enviados["senha_hash"]))
 
-    def test_usuarios_antigos_continuam_listados(self):
-        usuario = Usuario(id=1, nome="Ana", tipo="assinante", email=None,
-                          senha_hash=None, criado_em=datetime(2026, 10, 7))
+    # A lista pública de usuários não existe mais; só o cadastro e o /usuarios/eu.
+    def test_lista_publica_de_usuarios_foi_retirada(self):
+        app.dependency_overrides.clear()
         with TestClient(app) as cliente:
-            with patch.object(servico_usuario, "listar", return_value=[usuario]):
-                resposta = cliente.get("/usuarios")
-                self.assertEqual(resposta.status_code, 200)
-                self.assertIsNone(resposta.json()[0]["email"])
-                self.assertNotIn("senha_hash", resposta.json()[0])
+            self.assertEqual(cliente.get("/usuarios").status_code, 405)
+
+    # Usuário antigo, sem senha, não consegue entrar.
+    def test_usuario_sem_senha_nao_autentica(self):
+        antigo = Usuario(id=1, nome="Ana", tipo="assinante", email="ana@example.com", senha_hash=None)
+        with patch.object(repositorio_usuario, "buscar_por_email", return_value=antigo):
+            self.assertIsNone(servico_usuario.autenticar(Mock(), "ana@example.com", "teste1234"))
 
     def test_busca_email_normaliza_e_filtra(self):
         sessao = Mock()
@@ -381,9 +409,86 @@ class TestesSemConexao(unittest.TestCase):
         with TestClient(app) as cliente:
             with patch.object(servico_cesta, "listar", return_value=[]) as listar:
                 self.assertEqual(cliente.get("/cestas").status_code, 200)
-                self.assertEqual(listar.call_args.args[1:], (None, None, 1))
+                self.assertEqual(listar.call_args.args[1:], (self.usuario_teste, None, None, 1))
                 self.assertEqual(cliente.get("/cestas?tamanho=media&assinante_id=7&pagina=3").status_code, 200)
-                self.assertEqual(listar.call_args.args[1:], ("media", 7, 3))
+                self.assertEqual(listar.call_args.args[1:], (self.usuario_teste, "media", 7, 3))
+
+    # O serviço decide o que cada perfil vê: a assinante não escapa do filtro com assinante_id.
+    def test_servico_lista_so_as_cestas_da_assinante(self):
+        assinante = Usuario(id=2, nome="Aline", tipo="assinante")
+        with patch.object(repositorio_cesta, "listar", return_value=[]) as listar:
+            servico_cesta.listar(Mock(), assinante, "media", 7, 1)
+            self.assertEqual(listar.call_args.args[1:], ("media", 2, 1))
+            servico_cesta.listar(Mock(), self.usuario_teste, "media", 7, 1)
+            self.assertEqual(listar.call_args.args[1:], ("media", 7, 1))
+
+    # A regra recusa com exceção, antes de gravar, e não muda a situação.
+    def test_regra_do_limite_levanta_excecao(self):
+        cesta = Cesta(id=10, tamanho="pequena", situacao="pedida")
+        cesta.produtos_separados = [ProdutoSeparado(nome_produto="Alface", quantidade=4)]
+        dados = Mock(quantidade=2)
+        with patch.object(repositorio_produto, "salvar") as salvar:
+            with self.assertRaises(LimiteDaCestaExcedido):
+                servico_produto.separar(Mock(), cesta, dados)
+            salvar.assert_not_called()
+        self.assertEqual(cesta.situacao, "pedida")
+
+    # Token com uma letra trocada ou inventado não identifica ninguém: a rota devolve 401.
+    def test_token_adulterado_retorna_401(self):
+        token = criar_token(1)
+        self.assertEqual(ler_token(token), 1)
+        trocado = token[:-3] + ("AAA" if token[-3:] != "AAA" else "BBB")
+        self.assertIsNone(ler_token(trocado))
+        self.assertIsNone(ler_token("inventado"))
+        app.dependency_overrides.clear()
+        with TestClient(app) as cliente:
+            resposta = cliente.get("/cestas", headers={"Authorization": "Bearer inventado"})
+            self.assertEqual(resposta.status_code, 401)
+
+    # Testes específicos de autenticação e perfis da aula 08
+    def test_rotas_protegidas_sem_token_retornam_401(self):
+        app.dependency_overrides.clear()
+        with TestClient(app) as cliente:
+            self.assertEqual(cliente.get("/cestas").status_code, 401)
+            self.assertEqual(cliente.get("/usuarios/eu").status_code, 401)
+            self.assertEqual(cliente.post("/cestas", json={"semana": "2026-10-05", "tamanho": "pequena"}).status_code, 401)
+            self.assertEqual(cliente.post("/cestas/1/produtos", json={"nome_produto": "Alface", "quantidade": 1}).status_code, 401)
+
+    def test_login_sucesso_retorna_jwt_e_falha_retorna_401(self):
+        usuario = Usuario(id=1, nome="Vanderlei", tipo="produtor", email="vanderlei@example.com")
+        with patch.object(servico_usuario, "autenticar", return_value=usuario):
+            with TestClient(app) as cliente:
+                res = cliente.post("/login", data={"username": "vanderlei@example.com", "password": "correta"})
+                self.assertEqual(res.status_code, 200)
+                self.assertIn("access_token", res.json())
+                self.assertEqual(res.json()["token_type"], "bearer")
+
+        with patch.object(servico_usuario, "autenticar", return_value=None):
+            with TestClient(app) as cliente:
+                res = cliente.post("/login", data={"username": "vanderlei@example.com", "password": "incorreta"})
+                self.assertEqual(res.status_code, 401)
+                self.assertEqual(res.json()["detail"], "E-mail ou senha incorretos")
+
+    def test_exigir_produtor_recusa_assinante_com_403(self):
+        assinante = Usuario(id=2, nome="Aline", tipo="assinante", email="aline@example.com")
+        app.dependency_overrides[obter_usuario_atual] = lambda: assinante
+        with TestClient(app) as cliente:
+            res = cliente.post("/cestas/1/produtos", json={"nome_produto": "Alface", "quantidade": 1})
+            self.assertEqual(res.status_code, 403)
+            self.assertEqual(res.json()["detail"], "Só o produtor pode fazer isso")
+
+    def test_assinante_acessando_cesta_alheia_retorna_403(self):
+        assinante = Usuario(id=2, nome="Aline", tipo="assinante", email="aline@example.com")
+        app.dependency_overrides[obter_usuario_atual] = lambda: assinante
+        cesta_alheia = Cesta(id=10, assinante_id=999, tamanho="pequena", situacao="pedida")
+        with patch.object(servico_cesta, "buscar_por_id", return_value=cesta_alheia):
+            with TestClient(app) as cliente:
+                res = cliente.get("/cestas/10")
+                self.assertEqual(res.status_code, 403)
+                self.assertEqual(res.json()["detail"], "Esta cesta não é sua")
+                res_produtos = cliente.get("/cestas/10/produtos")
+                self.assertEqual(res_produtos.status_code, 403)
+                self.assertEqual(res_produtos.json()["detail"], "Esta cesta não é sua")
 
 
 # unittest executa os cenários sem exigir uma biblioteca adicional de testes.

@@ -1,6 +1,6 @@
 # Briefing inicial — Cesta do Vale
 
-> Rascunho para revisão do aluno. Os requisitos abaixo vêm de `CARTILHA_3.md`; as decisões pessoais registradas foram informadas pelo aluno.
+> Rascunho para revisão do aluno. Os requisitos abaixo vêm de `CARTILHA.md`; as decisões pessoais registradas foram informadas pelo aluno.
 
 ## Identificação do projeto
 
@@ -78,4 +78,4 @@ Não fazem parte da solução inicial: pagamento, rota de entrega, estoque em qu
 - **Apresentação da capacidade restante:** barra de progresso acompanhada do total separado, do limite e da quantidade que ainda cabe.
 - **Escolhas de caminhos, métodos e respostas da API:** [definir ao implementar o backend e justificar segundo o REST visto em aula].
 
-**Fonte:** `docs/CARTILHA_3.md`, preservada sem alterações.
+**Fonte:** `docs/CARTILHA.md`, preservada sem alterações.
