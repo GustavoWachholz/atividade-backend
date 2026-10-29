@@ -5,6 +5,7 @@ from banco import Base, engine
 from modelos.usuario import Usuario
 from modelos.cesta import Cesta
 from modelos.produto_separado import ProdutoSeparado
+from modelos.estoque import Estoque
 
 # context é fornecido pelo Alembic e entrega a configuração do alembic.ini.
 config = context.config
@@ -13,7 +14,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Os imports registram as três tabelas para futuras revisões.
+# Os imports registram as quatro tabelas (a quarta é o estoque) para o autogenerate enxergar cada uma.
 target_metadata = Base.metadata
 
 # O modo sem conexão usa a URL para gerar comandos, sem acessar o banco.

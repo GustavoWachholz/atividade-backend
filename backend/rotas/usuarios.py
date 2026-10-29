@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from banco import obter_sessao
 from esquemas.usuario import UsuarioCriacao, UsuarioResposta
-from rotas.autenticacao import obter_usuario_atual
+from rotas.autenticacao import exigir_ver_conta  # [NOVO · grupos] substitui obter_usuario_atual
 from servicos import usuario as servico_usuario
 from servicos.excecoes import EmailEmUso
 
@@ -25,7 +25,8 @@ def cadastrar_usuario(dados: UsuarioCriacao, sessao: Session = Depends(obter_ses
 # Mostra quem está logado; o Swagger exibe o cadeado para esta rota.
 @router.get("/eu", response_model=UsuarioResposta,
             summary="Mostrar quem está logado",
-            responses={401: {"description": "Sem token, ou token inválido ou vencido"}})
-def perfil_atual(usuario=Depends(obter_usuario_atual)):
+            responses={401: {"description": "Sem token, ou token inválido ou vencido"},
+                       403: {"description": "O grupo de quem está logado não tem a permissão conta:ver"}})
+def perfil_atual(usuario=Depends(exigir_ver_conta)):  # [NOVO · grupos]
     """O front usa o tipo devolvido aqui para escolher a tela de cada perfil."""
     return usuario

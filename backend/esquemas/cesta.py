@@ -15,14 +15,23 @@ class CestaCriacao(BaseModel):
                                   examples=["media"])
 
 
-# from_attributes permite ler os atributos do objeto SQLAlchemy na resposta.
+# Só o id e o nome de quem pediu: e-mail e senha da assinante não saem nesta resposta.
+class AssinanteResumo(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    nome: str
+
+
+# from_attributes permite ler os atributos do objeto SQLAlchemy na resposta,
+# inclusive o cesta.assinante, que vira o AssinanteResumo.
 class CestaResposta(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     assinante_id: int
+    assinante: AssinanteResumo
     semana: date
     tamanho: TamanhoCesta
-    situacao: Literal["pedida", "em_separacao"]
+    situacao: Literal["pedida", "em_separacao", "concluida", "recusada"]
     criado_em: datetime
 
 

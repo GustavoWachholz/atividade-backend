@@ -1,0 +1,31 @@
+services:
+  banco:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: cesta_do_vale
+      MYSQL_USER: app
+      MYSQL_PASSWORD: ${SENHA_DO_BANCO}
+      MYSQL_ROOT_PASSWORD: ${SENHA_DO_BANCO}
+    volumes:
+      - dados_do_banco:/var/lib/mysql
+
+  api:
+    build: ./backend
+    environment:
+      # o banco é alcançado pelo nome do serviço, não por localhost
+      URL_DO_BANCO: mysql+mysqlconnector://app:${SENHA_DO_BANCO}@banco:3306/cesta_do_vale
+      CHAVE_DO_TOKEN: ${CHAVE_DO_TOKEN}
+      ORIGEM_FRONTEND: http://localhost:8080
+    depends_on:
+      - banco
+
+  web:
+    build: ./frontend
+    ports: ["8080:80"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+    depends_on:
+      - api
+
+volumes:
+  dados_do_banco:

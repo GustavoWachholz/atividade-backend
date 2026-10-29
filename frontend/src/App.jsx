@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-const API_URL = 'http://127.0.0.1:8000';
+import { URL_DA_API } from './api';
 
 const tamanhos = {
   pequena: { nome: 'Pequena', limite: 5, classe: 'peach-bg', frase: 'O tamanho ideal para começar a aproveitar a semana.' },
@@ -15,8 +15,9 @@ const destaques = [
 ];
 
 // Mostra um ícone do conjunto SVG compartilhado pela interface.
+// Com rótulo, o role="img" faz o leitor de tela anunciar o ícone; sem rótulo, ele é escondido.
 function Icone({ nome, rotulo }) {
-  return <svg className="icon" aria-hidden={rotulo ? undefined : true} aria-label={rotulo}><use href={`#i-${nome}`} /></svg>;
+  return <svg className="icon" role={rotulo ? 'img' : undefined} aria-hidden={rotulo ? undefined : true} aria-label={rotulo}><use href={`#i-${nome}`} /></svg>;
 }
 
 // Mantém os símbolos acessíveis sem duplicar o desenho de cada ícone.
@@ -41,18 +42,92 @@ function DefinicoesDeIcones() {
   </svg>;
 }
 
-function semanaAtual() {
-  const hoje = new Date();
-  const inicio = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+// Quantas cestas o back devolve por página (o limit(10) do repositório)
+const POR_PAGINA = 10;
+
+// A cesta é "da semana": guardamos a segunda-feira daquela semana, no horário local.
+// getDay() vai de 0 (domingo) a 6 (sábado); a conta volta até a segunda-feira.
+function segundaDaSemana(data = new Date()) {
+  const inicio = new Date(data.getFullYear(), data.getMonth(), data.getDate());
   inicio.setDate(inicio.getDate() - ((inicio.getDay() + 6) % 7));
+  return inicio;
+}
+
+// Monta "AAAA-MM-DD" com a data local, o formato que o back espera no campo semana.
+// O toISOString() usava o horário UTC: depois das 21h no Brasil, gravava o dia seguinte.
+function dataISO(data) {
+  const mes = String(data.getMonth() + 1).padStart(2, '0');
+  const dia = String(data.getDate()).padStart(2, '0');
+  return `${data.getFullYear()}-${mes}-${dia}`;
+}
+
+// Mostra a semana como "20/10 a 26/10". O "AAAA-MM-DD" vira data local para não trocar de dia.
+// segundaDaSemana corrige as cestas antigas, que guardaram o dia do pedido e não a segunda-feira.
+function textoDaSemana(semanaISO) {
+  const [ano, mes, dia] = semanaISO.split('-').map(Number);
+  const inicio = segundaDaSemana(new Date(ano, mes - 1, dia));
   const fim = new Date(inicio);
   fim.setDate(fim.getDate() + 6);
   const formatar = (data) => data.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
   return `${formatar(inicio)} a ${formatar(fim)}`;
 }
 
-function dataISO(data = new Date()) {
-  return data.toISOString().split('T')[0];
+// Soma (ou subtrai) dias a uma semana "AAAA-MM-DD" e devolve no mesmo formato. Usada nas setas de semana.
+function somarDias(semanaISO, dias) {
+  const [ano, mes, dia] = semanaISO.split('-').map(Number);
+  return dataISO(new Date(ano, mes - 1, dia + dias));
+}
+
+// As setas de semana, usadas no estoque e na separação. A semana é sempre a segunda-feira "AAAA-MM-DD".
+function SeletorDeSemana({ semana, setSemana }) {
+  const atual = dataISO(segundaDaSemana());
+  return <div className="filter-bar week-bar">
+    <button type="button" className="carousel-arrow" onClick={() => setSemana(somarDias(semana, -7))} aria-label="Semana anterior"><Icone nome="left" /></button>
+    <strong>
+      <Icone nome="calendar" /> Semana {textoDaSemana(semana)}
+      {semana !== atual && (
+        <button type="button" className="text-link" onClick={() => setSemana(atual)}>voltar para esta semana</button>
+      )}
+    </strong>
+    <button type="button" className="carousel-arrow" onClick={() => setSemana(somarDias(semana, 7))} aria-label="Próxima semana"><Icone nome="right" /></button>
+  </div>;
+}
+
+// Busca o estoque de uma semana: os produtos com o disponível de cada um e os tamanhos liberados.
+// É usado nas três telas que dependem da colheita (estoque, separação e pedido).
+function buscarEstoque(token, semanaISO, aoExpirar) {
+  return fetch(`${URL_DA_API}/estoques?semana=${semanaISO}`, {
+    headers: { Authorization: 'Bearer ' + token }
+  }).then((res) => {
+    if (res.status === 401) { aoExpirar(); throw new Error('Sua sessão expirou. Entre de novo.'); }
+    if (!res.ok) throw new Error('Não foi possível carregar o estoque da semana.');
+    return res.json();
+  });
+}
+
+// Botões de página: o back pagina de 10 em 10. Se veio uma página cheia, pode haver uma próxima.
+function Paginacao({ pagina, setPagina, quantidade }) {
+  if (pagina === 1 && quantidade < POR_PAGINA) return null;  // tudo coube numa página só
+  return <nav className="pagination" aria-label="Páginas de cestas">
+    <button type="button" className="btn btn-secondary" disabled={pagina === 1} onClick={() => setPagina(pagina - 1)}>
+      <Icone nome="left" /> Anterior
+    </button>
+    <span>Página {pagina}</span>
+    <button type="button" className="btn btn-secondary" disabled={quantidade < POR_PAGINA} onClick={() => setPagina(pagina + 1)}>
+      Próxima <Icone nome="right" />
+    </button>
+  </nav>;
+}
+
+// Busca os produtos de todas as cestas da página ao mesmo tempo (Promise.all), e não uma por uma:
+// no celular da assinante, dez buscas em fila demoravam dez vezes mais. Devolve { idDaCesta: produtos }.
+function buscarProdutosDasCestas(token, lista) {
+  return Promise.all(lista.map((cesta) =>
+    fetch(`${URL_DA_API}/cestas/${cesta.id}/produtos`, { headers: { Authorization: 'Bearer ' + token } })
+      .then((r) => (r.ok ? r.json() : []))
+      .catch(() => [])
+      .then((produtos) => [cesta.id, produtos])
+  )).then((pares) => Object.fromEntries(pares));
 }
 
 // Soma as quantidades porque a capacidade não conta apenas os tipos de produto.
@@ -62,11 +137,14 @@ function itensSeparados(cesta) {
   return cesta.produtos.reduce((total, p) => total + (p.quantidade || 0), 0);
 }
 
-function textoCapacidade(cesta) {
+// "4 de 5 itens separados · cabe mais 1", como no styleguide. Com 1 o verbo fica no singular.
+// usadosExtra soma uma quantidade ainda não gravada, para a previsão do formulário de separação.
+function textoCapacidade(cesta, usadosExtra = 0) {
   const limite = tamanhos[cesta.tamanho]?.limite || 5;
-  const usados = itensSeparados(cesta);
+  const usados = itensSeparados(cesta) + usadosExtra;
   const livres = Math.max(0, limite - usados);
-  return `${usados} de ${limite} itens separados · ${livres === 0 ? 'cesta cheia' : `cabem mais ${livres}`}`;
+  const resto = livres === 0 ? 'cesta cheia' : livres === 1 ? 'cabe mais 1' : `cabem mais ${livres}`;
+  return `${usados} de ${limite} itens separados · ${resto}`;
 }
 
 function Capacidade({ cesta }) {
@@ -77,6 +155,36 @@ function Capacidade({ cesta }) {
     <progress value={usados} max={limite} aria-label={textoCapacidade(cesta)} />
     <p>{textoCapacidade(cesta)}</p>
   </div>;
+}
+
+// O texto e a cor de cada situação do pedido: pedida -> em separação -> concluída, ou recusada.
+const SITUACOES = {
+  pedida: { nome: 'Aguardando aprovação', classe: 'status-ordered' },
+  em_separacao: { nome: 'Em separação', classe: 'status-progress' },
+  concluida: { nome: 'Concluída', classe: 'status-done' },
+  recusada: { nome: 'Recusada', classe: 'status-refused' },
+};
+
+function SituacaoDaCesta({ situacao }) {
+  const info = SITUACOES[situacao] || SITUACOES.pedida;
+  return <span className={`status-badge ${info.classe}`}>{info.nome}</span>;
+}
+
+// PATCH de aprovar, reprovar ou concluir. Devolve a promessa; 401 volta para o login e
+// 409 mostra a frase que vem do serviço (ex.: "A cesta ainda não está cheia. Faltam 1 itens.").
+function decidirCesta(token, cestaId, acao, aoExpirar) {
+  return fetch(`${URL_DA_API}/cestas/${cestaId}/${acao}`, {
+    method: 'PATCH',
+    headers: { Authorization: 'Bearer ' + token }
+  }).then(async (res) => {
+    if (res.status === 401) { aoExpirar(); throw new Error('Sua sessão expirou. Entre de novo.'); }
+    if (res.status === 409) {
+      const corpo = await res.json();
+      throw new Error(corpo.detail || 'A cesta não está na situação esperada.');
+    }
+    if (!res.ok) throw new Error('Não foi possível atualizar a cesta.');
+    return res.json();
+  });
 }
 
 function ProdutosDaCesta({ produtos }) {
@@ -138,7 +246,10 @@ function Cabecalho({ usuario, aoSair, navegar, telaAtual }) {
             </>
           )}
           {usuario.tipo === 'produtor' && (
-            <button type="button" className={`nav-link ${telaAtual === 'separacao' ? 'active' : ''}`} onClick={() => navegar('separacao')}>A separação</button>
+            <>
+              <button type="button" className={`nav-link ${telaAtual === 'separacao' ? 'active' : ''}`} onClick={() => navegar('separacao')}>A separação</button>
+              <button type="button" className={`nav-link ${telaAtual === 'estoque' ? 'active' : ''}`} onClick={() => navegar('estoque')}>O estoque</button>
+            </>
           )}
         </div>
       </div>
@@ -162,7 +273,7 @@ function Login({ aoEntrar }) {
     setMensagem('');
     setCarregando(true);
     const corpo = new URLSearchParams({ username: email, password: senha });
-    fetch(`${API_URL}/login`, { method: 'POST', body: corpo })
+    fetch(`${URL_DA_API}/login`, { method: 'POST', body: corpo })
       .then((resposta) => {
         if (!resposta.ok) throw new Error('e-mail ou senha incorretos');
         return resposta.json();
@@ -179,7 +290,7 @@ function Login({ aoEntrar }) {
     e.preventDefault();
     setMensagem('');
     setCarregando(true);
-    fetch(`${API_URL}/usuarios`, {
+    fetch(`${URL_DA_API}/usuarios`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ nome, tipo, email, senha })
@@ -192,8 +303,11 @@ function Login({ aoEntrar }) {
       .then(() => {
         // Após cadastrar com sucesso, realiza o login automaticamente
         const corpo = new URLSearchParams({ username: email, password: senha });
-        return fetch(`${API_URL}/login`, { method: 'POST', body: corpo })
-          .then((r) => r.json())
+        return fetch(`${URL_DA_API}/login`, { method: 'POST', body: corpo })
+          .then((r) => {
+            if (!r.ok) throw new Error('Conta criada, mas não foi possível entrar. Tente pelo login.');
+            return r.json();
+          })
           .then((dados) => {
             localStorage.setItem('token', dados.access_token);
             aoEntrar(dados.access_token);
@@ -203,26 +317,22 @@ function Login({ aoEntrar }) {
       .finally(() => setCarregando(false));
   };
 
-  const preencherDemo = (demoEmail, demoSenha) => {
-    setEmail(demoEmail);
-    setSenha(demoSenha);
-    setModo('login');
-    setMensagem('');
-  };
-
   return <div className="auth-wrap">
     <div className="auth-card">
       <div className="auth-header">
         <span className="auth-logo">
-          <img src="/marca/logo_cesta_do_vale_em_estilo_cartum.png" alt="Cesta do Vale" width="220" height="72" />
+          <img src="/marca/logo_cesta_do_vale_em_estilo_cartum.png" alt="Cesta do Vale" width="240" height="79" />
         </span>
         <h1>{modo === 'login' ? 'Entrar no sistema' : 'Criar nova conta'}</h1>
         <p>{modo === 'login' ? 'Digite suas credenciais para acessar sua área.' : 'Cadastre-se como assinante ou produtor da horta.'}</p>
       </div>
 
+      {/* role="tab" e aria-selected dizem ao leitor de tela qual das duas abas está aberta */}
       <div className="auth-tabs" role="tablist">
         <button
           type="button"
+          role="tab"
+          aria-selected={modo === 'login'}
           className={`auth-tab ${modo === 'login' ? 'active' : ''}`}
           onClick={() => { setModo('login'); setMensagem(''); }}
         >
@@ -230,6 +340,8 @@ function Login({ aoEntrar }) {
         </button>
         <button
           type="button"
+          role="tab"
+          aria-selected={modo === 'cadastro'}
           className={`auth-tab ${modo === 'cadastro' ? 'active' : ''}`}
           onClick={() => { setModo('cadastro'); setMensagem(''); }}
         >
@@ -275,6 +387,7 @@ function Login({ aoEntrar }) {
               type="text"
               required
               minLength={2}
+              maxLength={100}
               placeholder="Ex.: Aline Silva"
               value={nome}
               onChange={(e) => setNome(e.target.value)}
@@ -292,6 +405,7 @@ function Login({ aoEntrar }) {
             <input
               type="email"
               required
+              maxLength={100}
               placeholder="seu@email.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -313,42 +427,22 @@ function Login({ aoEntrar }) {
           </button>
         </form>
       )}
-
-      <div className="auth-demos">
-        <div className="auth-demos-title">Acesso rápido para avaliação</div>
-        <div className="auth-demos-grid">
-          <button
-            type="button"
-            className="btn-demo"
-            onClick={() => preencherDemo('aline@cestadovale.com', 'teste1234')}
-          >
-            <span>Aline (Assinante)</span>
-            <small>aline@cestadovale.com</small>
-          </button>
-          <button
-            type="button"
-            className="btn-demo"
-            onClick={() => preencherDemo('vanderlei@cestadovale.com', 'teste1234')}
-          >
-            <span>Vanderlei (Produtor)</span>
-            <small>vanderlei@cestadovale.com</small>
-          </button>
-        </div>
-      </div>
     </div>
   </div>;
 }
 
 // Tela de Minhas Cestas da Assinante (Aline)
-function MinhasCestas({ token, navegar, abrirPedido, aoExpirar }) {
+function MinhasCestas({ token, navegar, abrirPedido, aoExpirar, versao }) {
   const [cestas, setCestas] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
   const [produtosPorCesta, setProdutosPorCesta] = useState({});
+  const [pagina, setPagina] = useState(1);
 
   const carregarCestas = () => {
     setCarregando(true);
-    fetch(`${API_URL}/cestas`, {
+    setErro('');   // limpa o erro da busca anterior
+    fetch(`${URL_DA_API}/cestas?pagina=${pagina}`, {
       headers: { Authorization: 'Bearer ' + token }
     })
       .then((res) => {
@@ -357,31 +451,19 @@ function MinhasCestas({ token, navegar, abrirPedido, aoExpirar }) {
         if (!res.ok) throw new Error('Não foi possível carregar as cestas');
         return res.json();
       })
-      .then(async (lista) => {
+      .then((lista) => {
         setCestas(lista);
-        // Busca os produtos de cada cesta
-        const produtosMap = {};
-        for (const c of lista) {
-          try {
-            const r = await fetch(`${API_URL}/cestas/${c.id}/produtos`, {
-              headers: { Authorization: 'Bearer ' + token }
-            });
-            if (r.ok) {
-              produtosMap[c.id] = await r.json();
-            }
-          } catch {
-            produtosMap[c.id] = [];
-          }
-        }
-        setProdutosPorCesta(produtosMap);
+        return buscarProdutosDasCestas(token, lista);
       })
+      .then(setProdutosPorCesta)
       .catch((err) => setErro(err.message))
       .finally(() => setCarregando(false));
   };
 
+  // Busca de novo quando o token muda ou quando o App avisa que algo foi gravado (versao)
   useEffect(() => {
     carregarCestas();
-  }, [token]);
+  }, [token, versao, pagina]);
 
   return <section className="container workspace page" aria-labelledby="titulo-minhas-cestas">
     <div className="workspace-heading">
@@ -413,20 +495,26 @@ function MinhasCestas({ token, navegar, abrirPedido, aoExpirar }) {
                 <div className="entry-top">
                   <div>
                     <span className="entry-meta">
-                      <Icone nome="calendar" /> SEMANA {cesta.semana}
+                      <Icone nome="calendar" /> SEMANA {textoDaSemana(cesta.semana)}
                     </span>
                     <h2 className="entry-title">Cesta {tamanhos[cesta.tamanho]?.nome.toLowerCase()}</h2>
                     <p className="entry-person">Pedido nº #{cesta.id}</p>
                   </div>
-                  <span className={`status-badge ${cesta.situacao === 'em_separacao' ? 'status-progress' : 'status-ordered'}`}>
-                    {cesta.situacao === 'em_separacao' ? 'Em separação' : 'Pedida'}
-                  </span>
+                  <SituacaoDaCesta situacao={cesta.situacao} />
                 </div>
-                <Capacidade cesta={cestaComProds} />
-                <div className="entry-items">
-                  <h3>Produtos separados pelo produtor</h3>
-                  <ProdutosDaCesta produtos={prods} />
-                </div>
+                {cesta.situacao === 'pedida' && (
+                  <p className="entry-empty">Seu pedido foi enviado. O produtor ainda vai aprovar ou recusar.</p>
+                )}
+                {cesta.situacao === 'recusada' && (
+                  <p className="entry-empty">O produtor não pôde atender este pedido. Você pode pedir outra cesta.</p>
+                )}
+                {(cesta.situacao === 'em_separacao' || cesta.situacao === 'concluida') && <>
+                  <Capacidade cesta={cestaComProds} />
+                  <div className="entry-items">
+                    <h3>Produtos separados pelo produtor</h3>
+                    <ProdutosDaCesta produtos={prods} />
+                  </div>
+                </>}
               </article>
             );
           })
@@ -442,20 +530,42 @@ function MinhasCestas({ token, navegar, abrirPedido, aoExpirar }) {
         )}
       </div>
     )}
+    <Paginacao pagina={pagina} setPagina={setPagina} quantidade={cestas.length} />
   </section>;
 }
 
 // Tela de Separação do Produtor (Vanderlei)
-function Separacao({ token, abrirFechamento, aoExpirar }) {
+function Separacao({ token, abrirFechamento, aoExpirar, versao }) {
   const [cestas, setCestas] = useState([]);
   const [tamanho, setTamanho] = useState('todas');
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
   const [produtosPorCesta, setProdutosPorCesta] = useState({});
+  const [pagina, setPagina] = useState(1);
+  // Começa na semana atual, a mesma do estoque; as setas trocam de semana como na tela do estoque
+  const [semana, setSemana] = useState(() => dataISO(segundaDaSemana()));
+  // Filtro por assinante: { id, nome } de quem foi escolhida, ou null para ver todas.
+  // Não existe lista de usuários na API, então o filtro nasce do nome mostrado em cada cesta.
+  const [assinante, setAssinante] = useState(null);
+  // Id da cesta com um PATCH em andamento: desliga os botões dela para não decidir duas vezes.
+  const [decidindo, setDecidindo] = useState(null);
+
+  // Aprova, reprova ou conclui; depois busca a lista de novo para a cesta mudar de situação na tela.
+  const decidir = (cesta, acao) => {
+    setDecidindo(cesta.id);
+    setErro('');
+    decidirCesta(token, cesta.id, acao, aoExpirar)
+      .then(() => carregarTodasCestas())
+      .catch((err) => setErro(err.message))
+      .finally(() => setDecidindo(null));
+  };
 
   const carregarTodasCestas = () => {
     setCarregando(true);
-    const url = tamanho === 'todas' ? `${API_URL}/cestas` : `${API_URL}/cestas?tamanho=${tamanho}`;
+    setErro('');   // limpa o erro da busca anterior
+    const filtro = tamanho === 'todas' ? '' : `&tamanho=${tamanho}`;
+    const filtroAssinante = assinante ? `&assinante_id=${assinante.id}` : '';
+    const url = `${URL_DA_API}/cestas?pagina=${pagina}&semana=${semana}${filtro}${filtroAssinante}`;
     fetch(url, {
       headers: { Authorization: 'Bearer ' + token }
     })
@@ -465,55 +575,56 @@ function Separacao({ token, abrirFechamento, aoExpirar }) {
         if (!res.ok) throw new Error('Não foi possível carregar as cestas');
         return res.json();
       })
-      .then(async (lista) => {
+      .then((lista) => {
         setCestas(lista);
-        const produtosMap = {};
-        for (const c of lista) {
-          try {
-            const r = await fetch(`${API_URL}/cestas/${c.id}/produtos`, {
-              headers: { Authorization: 'Bearer ' + token }
-            });
-            if (r.ok) {
-              produtosMap[c.id] = await r.json();
-            }
-          } catch {
-            produtosMap[c.id] = [];
-          }
-        }
-        setProdutosPorCesta(produtosMap);
+        return buscarProdutosDasCestas(token, lista);
       })
+      .then(setProdutosPorCesta)
       .catch((err) => setErro(err.message))
       .finally(() => setCarregando(false));
   };
 
+  // Busca de novo quando muda o token, um filtro ou quando o App avisa que algo foi gravado (versao)
   useEffect(() => {
     carregarTodasCestas();
-  }, [token, tamanho]);
+  }, [token, tamanho, versao, pagina, semana, assinante]);
+
+  // Trocar de semana volta para a primeira página, como trocar o filtro de tamanho
+  const mudarSemana = (nova) => { setSemana(nova); setPagina(1); };
+  // Escolher (ou tirar) a assinante também volta para a primeira página
+  const mudarAssinante = (nova) => { setAssinante(nova); setPagina(1); };
 
   return <section className="container workspace page" aria-labelledby="titulo-separacao">
     <div className="workspace-heading">
       <div>
         <span className="section-overline">ÁREA DO PRODUTOR</span>
         <h1 id="titulo-separacao">A <span>separação</span></h1>
-        <p>Veja todas as cestas da horta, confira os limites e registre os produtos colhidos.</p>
+        <p>Veja as cestas da horta semana a semana, confira os limites e registre os produtos colhidos.</p>
       </div>
-      <span className="producer-week">
-        <Icone nome="calendar" /> Semana atual
-      </span>
     </div>
+
+    <SeletorDeSemana semana={semana} setSemana={mudarSemana} />
 
     <div className="filter-bar">
       <label htmlFor="filtro-tamanho">
         Filtrar por tamanho
-        <select id="filtro-tamanho" value={tamanho} onChange={(e) => setTamanho(e.target.value)}>
+        <select id="filtro-tamanho" value={tamanho} onChange={(e) => { setTamanho(e.target.value); setPagina(1); }}>
           <option value="todas">Todos os tamanhos</option>
           <option value="pequena">Pequena (5 itens)</option>
           <option value="media">Média (8 itens)</option>
           <option value="grande">Grande (12 itens)</option>
         </select>
       </label>
+      {assinante && (
+        <div className="filter-chip">
+          Só as cestas de <strong>{assinante.nome}</strong>
+          <button type="button" onClick={() => mudarAssinante(null)} aria-label={`Tirar o filtro de ${assinante.nome}`}>
+            <Icone nome="x" />
+          </button>
+        </div>
+      )}
       <div className="filter-summary" aria-live="polite">
-        {cestas.length} {cestas.length === 1 ? 'cesta encontrada' : 'cestas encontradas'}
+        Página {pagina} · {cestas.length} {cestas.length === 1 ? 'cesta' : 'cestas'}
       </div>
     </div>
 
@@ -536,47 +647,182 @@ function Separacao({ token, abrirFechamento, aoExpirar }) {
                 <div className="entry-top">
                   <div>
                     <span className="entry-meta">
-                      <Icone nome="calendar" /> SEMANA {cesta.semana}
+                      <Icone nome="calendar" /> SEMANA {textoDaSemana(cesta.semana)}
                     </span>
                     <h2 className="entry-title">Cesta {tamanhos[cesta.tamanho]?.nome.toLowerCase()} #{cesta.id}</h2>
-                    <p className="entry-person">Assinante ID: <strong>{cesta.assinante_id}</strong></p>
+                    <p className="entry-person">
+                      Assinante: <strong>{cesta.assinante?.nome}</strong>
+                      {!assinante && cesta.assinante && (
+                        <button type="button" className="text-link" onClick={() => mudarAssinante(cesta.assinante)}>
+                          ver só as cestas de {cesta.assinante.nome}
+                        </button>
+                      )}
+                    </p>
                   </div>
-                  <span className={`status-badge ${cesta.situacao === 'em_separacao' ? 'status-progress' : 'status-ordered'}`}>
-                    {cesta.situacao === 'em_separacao' ? 'Em separação' : 'Pedida'}
-                  </span>
+                  <SituacaoDaCesta situacao={cesta.situacao} />
                 </div>
-                <Capacidade cesta={cestaComProds} />
-                <div className="entry-items">
-                  <h3>Produtos já separados</h3>
-                  <ProdutosDaCesta produtos={prods} />
-                </div>
-                <div className="entry-actions">
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    disabled={cheia}
-                    onClick={() => abrirFechamento(cestaComProds)}
-                  >
-                    {cheia ? 'Cesta cheia' : 'Separar produto'} <Icone nome="arrow" />
-                  </button>
-                </div>
+                {/* Pedida: o produtor decide. Em separação e concluída mostram a capacidade e os produtos. */}
+                {cesta.situacao !== 'pedida' && cesta.situacao !== 'recusada' && <>
+                  <Capacidade cesta={cestaComProds} />
+                  <div className="entry-items">
+                    <h3>Produtos já separados</h3>
+                    <ProdutosDaCesta produtos={prods} />
+                  </div>
+                </>}
+                {cesta.situacao === 'pedida' && (
+                  <div className="entry-actions entry-actions-row">
+                    <button type="button" className="btn btn-primary" disabled={decidindo === cesta.id}
+                      onClick={() => decidir(cesta, 'aprovar')}>
+                      Aprovar pedido <Icone nome="check" />
+                    </button>
+                    <button type="button" className="btn btn-secondary" disabled={decidindo === cesta.id}
+                      onClick={() => decidir(cesta, 'reprovar')}>
+                      Reprovar
+                    </button>
+                  </div>
+                )}
+                {cesta.situacao === 'em_separacao' && (
+                  <div className="entry-actions entry-actions-row">
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={cheia}
+                      onClick={() => abrirFechamento(cestaComProds)}
+                    >
+                      {cheia ? 'Cesta cheia' : 'Separar produto'} <Icone nome="arrow" />
+                    </button>
+                    {/* Só conclui a cesta cheia; o back também confere e responde 409 se faltar item */}
+                    <button type="button" className="btn btn-secondary"
+                      disabled={!cheia || decidindo === cesta.id}
+                      onClick={() => decidir(cesta, 'concluir')}>
+                      Concluir cesta <Icone nome="check" />
+                    </button>
+                  </div>
+                )}
               </article>
             );
           })
         ) : (
           <div className="empty-workspace">
             <Icone nome="filter" />
-            <h3>Nenhuma cesta encontrada com esse filtro</h3>
-            <p>Selecione outro tamanho acima para consultar.</p>
+            <h3>Nenhuma cesta encontrada nesta semana</h3>
+            <p>Troque a semana com as setas, selecione outro tamanho ou tire o filtro de assinante.</p>
           </div>
         )}
       </div>
     )}
+    <Paginacao pagina={pagina} setPagina={setPagina} quantidade={cestas.length} />
+  </section>;
+}
+
+// Tela do estoque do produtor: cadastra o que foi colhido na semana e mostra o que sobrou de cada produto.
+// Começa na semana atual; as setas trocam de semana para cadastrar a colheita da próxima.
+function Estoque({ token, aoExpirar, versao, aoCadastrar }) {
+  const [semana, setSemana] = useState(() => dataISO(segundaDaSemana()));
+  const [resumo, setResumo] = useState(null);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState('');
+  const [nome, setNome] = useState('');
+  const [quantidade, setQuantidade] = useState('1');
+  const [salvando, setSalvando] = useState(false);
+
+  // Busca de novo quando muda a semana ou quando o App avisa que algo foi gravado (versao)
+  useEffect(() => {
+    setCarregando(true);
+    setErro('');
+    buscarEstoque(token, semana, aoExpirar)
+      .then(setResumo)
+      .catch((err) => setErro(err.message))
+      .finally(() => setCarregando(false));
+  }, [token, semana, versao]);
+
+  const submeter = (e) => {
+    e.preventDefault();
+    const qtd = Number(quantidade);
+    if (!nome.trim()) { setErro('Informe o nome do produto colhido.'); return; }
+    if (!Number.isInteger(qtd) || qtd < 1) { setErro('Informe uma quantidade inteira, a partir de 1.'); return; }
+    setSalvando(true);
+    setErro('');
+    fetch(`${URL_DA_API}/estoques`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ semana, nome_produto: nome.trim(), quantidade: qtd })
+    })
+      .then((res) => {
+        if (res.status === 401) { aoExpirar(); throw new Error('Sua sessão expirou. Entre de novo.'); }
+        if (!res.ok) throw new Error('Não foi possível cadastrar o produto.');
+        return res.json();
+      })
+      .then((salvo) => {
+        setNome('');
+        setQuantidade('1');
+        // O back soma quando o produto já existe na semana; o aviso mostra o total que ficou.
+        aoCadastrar(`${qtd} un. de ${salvo.nome_produto} no estoque. Total na semana: ${salvo.quantidade}.`);
+      })
+      .catch((err) => setErro(err.message))
+      .finally(() => setSalvando(false));
+  };
+
+  return <section className="container workspace page" aria-labelledby="titulo-estoque">
+    <div className="workspace-heading">
+      <div>
+        <span className="section-overline">ÁREA DO PRODUTOR</span>
+        <h1 id="titulo-estoque">O <span>estoque</span></h1>
+        <p>Cadastre o que foi colhido na semana. As cestas são montadas com esses produtos, e a assinante só pede o tamanho que cabe no que sobrou.</p>
+      </div>
+    </div>
+
+    <SeletorDeSemana semana={semana} setSemana={setSemana} />
+
+    {erro && <div className="dialog-error" role="alert">{erro}</div>}
+
+    <div className="stock-layout">
+      <form className="producer-entry stock-form" onSubmit={submeter}>
+        <h2 className="entry-title">Registrar colheita</h2>
+        <label htmlFor="estoque-nome">Produto colhido</label>
+        <input id="estoque-nome" type="text" maxLength={100} placeholder="Ex.: Alface crespa"
+          value={nome} onChange={(e) => setNome(e.target.value)} />
+        <label htmlFor="estoque-quantidade">Quantidade (unidades)</label>
+        <input id="estoque-quantidade" type="number" min="1" step="1"
+          value={quantidade} onChange={(e) => setQuantidade(e.target.value)} />
+        <p className="dialog-hint">Se o produto já está na semana, a quantidade é somada ao que já foi colhido.</p>
+        <button type="submit" className="btn btn-primary" disabled={salvando}>
+          {salvando ? 'Registrando...' : 'Adicionar ao estoque'} <Icone nome="check" />
+        </button>
+      </form>
+
+      <div className="producer-entry">
+        {carregando || !resumo ? <p>Carregando o estoque...</p> : <>
+          <div className="order-summary stock-summary">
+            <div><span>Colhido na semana</span><strong>{resumo.total_colhido} itens</strong></div>
+            <div><span>Reservado pelas cestas aprovadas</span><strong>{resumo.total_reservado} itens</strong></div>
+            <div><span>Livres para aprovar mais pedidos</span><strong>{resumo.itens_livres} itens</strong></div>
+          </div>
+          {resumo.itens.length ? (
+            <table className="stock-table">
+              <thead><tr><th>Produto</th><th>Colhido</th><th>Separado</th><th>Disponível</th></tr></thead>
+              <tbody>
+                {resumo.itens.map((item) => (
+                  <tr key={item.nome_produto}>
+                    <td>{item.nome_produto}</td>
+                    <td>{item.colhido}</td>
+                    <td>{item.separado}</td>
+                    <td><strong>{item.disponivel}</strong></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="entry-empty">Nada colhido nesta semana ainda. Enquanto o estoque estiver vazio, nenhuma cesta pode ser pedida.</p>
+          )}
+        </>}
+      </div>
+    </div>
   </section>;
 }
 
 // Rodapé institucional
-function Rodape({ navegar }) {
+function Rodape({ navegar, usuario }) {
   return <footer className="site-footer">
     <div className="container footer-main">
       <div className="footer-about">
@@ -587,8 +833,13 @@ function Rodape({ navegar }) {
       </div>
       <div>
         <h2>Explore</h2>
-        <button type="button" onClick={() => navegar('inicio')}>Início</button>
-        <button type="button" onClick={() => navegar('cestas')}>Minhas cestas</button>
+        {usuario.tipo === 'assinante' ? <>
+          <button type="button" onClick={() => navegar('inicio')}>Início</button>
+          <button type="button" onClick={() => navegar('cestas')}>Minhas cestas</button>
+        </> : <>
+          <button type="button" onClick={() => navegar('separacao')}>A separação</button>
+          <button type="button" onClick={() => navegar('estoque')}>O estoque</button>
+        </>}
       </div>
       <div className="footer-message">
         <Icone nome="heart" />
@@ -597,8 +848,7 @@ function Rodape({ navegar }) {
       </div>
     </div>
     <div className="container footer-bottom">
-      <span>© {new Date().getFullYear()} Cesta do Vale · Projeto com autenticação JWT e perfis</span>
-      <span>Ciclo 4 · O acesso</span>
+      <span>© {new Date().getFullYear()} Cesta do Vale · horta comunitária</span>
     </div>
   </footer>;
 }
@@ -633,6 +883,8 @@ function Inicio({ pedir, navegar }) {
                   className={`dot ${indice === destaque ? 'active' : ''}`}
                   key={indice}
                   onClick={() => setDestaque(indice)}
+                  aria-label={`Destaque ${indice + 1} de ${destaques.length}`}
+                  aria-current={indice === destaque ? 'true' : undefined}
                 />
               ))}
             </div>
@@ -691,28 +943,49 @@ function Inicio({ pedir, navegar }) {
 }
 
 // Formulário de separação de produto (exclusivo do produtor)
-function FormularioDeProduto({ cesta, aoCancelar, aoSalvar }) {
+// O produto vem de uma lista com o estoque da semana da cesta: só aparece o que ainda tem disponível.
+function FormularioDeProduto({ cesta, token, aoExpirar, aoCancelar, aoSalvar }) {
   const [nome, setNome] = useState('');
   const [quantidade, setQuantidade] = useState('1');
   const [erro, setErro] = useState('');
   const [salvando, setSalvando] = useState(false);
+  const [estoque, setEstoque] = useState(null);
+
+  // O estoque é o da semana da cesta, que pode não ser a semana atual
+  useEffect(() => {
+    buscarEstoque(token, cesta.semana, aoExpirar)
+      .then(setEstoque)
+      .catch((err) => setErro(err.message));
+  }, [token, cesta.semana]);
 
   const limite = tamanhos[cesta.tamanho]?.limite || 5;
   const restante = Math.max(0, limite - itensSeparados(cesta));
+  const produtosDisponiveis = estoque ? estoque.itens.filter((item) => item.disponivel > 0) : [];
+  const escolhido = produtosDisponiveis.find((item) => item.nome_produto === nome);
+  // A quantidade respeita as duas regras: o que cabe na cesta e o que sobrou do produto
+  const maximo = escolhido ? Math.min(restante, escolhido.disponivel) : restante;
+  // Previsão do espaço depois de registrar (styleguide, "O fechamento"): só com quantidade inteira que cabe
+  const qtdDigitada = Number(quantidade);
+  const previsaoValida = Number.isInteger(qtdDigitada) && qtdDigitada >= 1 && qtdDigitada <= restante;
 
   const submeter = (e) => {
     e.preventDefault();
-    if (!nome.trim()) {
-      setErro('Informe o nome do produto colhido.');
+    if (!escolhido) {
+      setErro('Escolha um produto do estoque da semana.');
       return;
     }
     const qtd = Number(quantidade);
-    if (!qtd || qtd < 1) {
-      setErro('Informe uma quantidade válida.');
+    // Number.isInteger recusa 1,5 aqui mesmo: o back só aceita inteiros e responderia 422
+    if (!Number.isInteger(qtd) || qtd < 1) {
+      setErro('Informe uma quantidade inteira, a partir de 1.');
       return;
     }
     if (qtd > restante) {
       setErro(`Capacidade insuficiente: cabem apenas mais ${restante} unidades nesta cesta.`);
+      return;
+    }
+    if (qtd > escolhido.disponivel) {
+      setErro(`Estoque insuficiente: restam só ${escolhido.disponivel} unidades de ${escolhido.nome_produto}.`);
       return;
     }
 
@@ -731,23 +1004,38 @@ function FormularioDeProduto({ cesta, aoCancelar, aoSalvar }) {
     <h2 id="titulo-fechamento">Separar produto na cesta #{cesta.id}</h2>
     <div className="remaining-box">{textoCapacidade(cesta)}</div>
     <form id="produce-form" onSubmit={submeter}>
-      <label htmlFor="nome-produto">Nome do produto colhido</label>
-      <input
+      <label htmlFor="nome-produto">Produto do estoque da semana</label>
+      {/* O select só lista o que foi colhido na semana da cesta e ainda tem unidades */}
+      <select
         id="nome-produto"
-        type="text"
-        placeholder="Ex.: Alface crespa, Tomate, Cenoura"
         value={nome}
+        disabled={!estoque || !produtosDisponiveis.length}
         onChange={(e) => setNome(e.target.value)}
-      />
+      >
+        <option value="">
+          {!estoque ? 'Carregando o estoque...' : produtosDisponiveis.length ? 'Escolha um produto' : 'Nenhum produto disponível nesta semana'}
+        </option>
+        {produtosDisponiveis.map((item) => (
+          <option key={item.nome_produto} value={item.nome_produto}>
+            {item.nome_produto} · {item.disponivel} disponíveis
+          </option>
+        ))}
+      </select>
       <label htmlFor="quantidade-produto">Quantidade (unidades)</label>
       <input
         id="quantidade-produto"
         type="number"
         min="1"
-        max={restante}
+        step="1"
+        max={maximo}
         value={quantidade}
         onChange={(e) => setQuantidade(e.target.value)}
       />
+      <p className="dialog-hint" aria-live="polite">
+        {previsaoValida
+          ? `Depois de registrar: ${textoCapacidade(cesta, qtdDigitada)}`
+          : `Escolha de 1 a ${restante} ${restante === 1 ? 'unidade' : 'unidades'} para ver como a cesta fica.`}
+      </p>
       {erro && <p className="dialog-error" role="alert">{erro}</p>}
       <div className="dialog-actions">
         <button type="button" className="btn btn-secondary" onClick={aoCancelar}>Cancelar</button>
@@ -767,11 +1055,18 @@ export default function App() {
   const [tamanhoPedido, setTamanhoPedido] = useState(null);
   const [cestaEmFechamento, setCestaEmFechamento] = useState(null);
   const [aviso, setAviso] = useState('');
+  // versao é um contador: sobe a cada gravação que deu certo, e as telas que leem
+  // as cestas usam esse número no useEffect para buscar a lista de novo, sem F5
+  const [versao, setVersao] = useState(0);
+  // O estoque da semana atual, buscado quando a janela de pedido abre
+  const [estoquePedido, setEstoquePedido] = useState(null);
+  const [erroPedido, setErroPedido] = useState('');
+  const pedidoAberto = Boolean(tamanhoPedido);
 
   // Leitura linha a linha (Slide 36): a pulseira vai no cabeçalho
   useEffect(() => {
     if (!token) return;
-    fetch(`${API_URL}/usuarios/eu`, {
+    fetch(`${URL_DA_API}/usuarios/eu`, {
       headers: { Authorization: 'Bearer ' + token }
     })
       .then((resposta) => {
@@ -791,6 +1086,17 @@ export default function App() {
       });
   }, [token]);
 
+  // Ao abrir a janela de pedido, busca o estoque da semana: ele diz quais tamanhos estão liberados
+  // e quais produtos vêm na cesta. Depende só de abrir e fechar, e não de trocar o tamanho.
+  useEffect(() => {
+    if (!pedidoAberto) return;
+    setEstoquePedido(null);
+    setErroPedido('');
+    buscarEstoque(token, dataISO(segundaDaSemana()), sair)
+      .then(setEstoquePedido)
+      .catch((err) => setErroPedido(err.message));
+  }, [pedidoAberto, token]);
+
   useEffect(() => {
     if (!aviso) return undefined;
     const tempo = window.setTimeout(() => setAviso(''), 4500);
@@ -806,33 +1112,39 @@ export default function App() {
 
   const confirmarPedido = () => {
     if (!tamanhoPedido) return;
-    fetch(`${API_URL}/cestas`, {
+    fetch(`${URL_DA_API}/cestas`, {
       method: 'POST',
       headers: {
         Authorization: 'Bearer ' + token,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        semana: dataISO(),
+        semana: dataISO(segundaDaSemana()),
         tamanho: tamanhoPedido
       })
     })
-      .then((res) => {
+      .then(async (res) => {
         if (res.status === 401) { sair(); throw new Error('Sua sessão expirou. Entre de novo.'); }
+        // 409: o estoque acabou entre abrir a janela e confirmar; a frase vem do serviço
+        if (res.status === 409) {
+          const erro = await res.json();
+          throw new Error(erro.detail || 'Não há estoque para esse tamanho nesta semana.');
+        }
         if (!res.ok) throw new Error('Não foi possível criar o pedido');
         return res.json();
       })
       .then(() => {
         setTamanhoPedido(null);
-        setAviso(`Sua cesta ${tamanhos[tamanhoPedido]?.nome.toLowerCase()} da semana foi pedida!`);
+        setVersao((atual) => atual + 1);   // a cesta nova aparece em Minhas cestas
+        setAviso(`Sua cesta ${tamanhos[tamanhoPedido]?.nome.toLowerCase()} da semana foi pedida! Aguarde a aprovação do produtor.`);
         setTela('cestas');
       })
-      .catch((err) => setAviso(err.message));
+      .catch((err) => setErroPedido(err.message));
   };
 
   const registrarProduto = async (nomeProduto, quantidade) => {
     if (!cestaEmFechamento) return;
-    const res = await fetch(`${API_URL}/cestas/${cestaEmFechamento.id}/produtos`, {
+    const res = await fetch(`${URL_DA_API}/cestas/${cestaEmFechamento.id}/produtos`, {
       method: 'POST',
       headers: {
         Authorization: 'Bearer ' + token,
@@ -857,6 +1169,7 @@ export default function App() {
     }
 
     setCestaEmFechamento(null);
+    setVersao((atual) => atual + 1);     // a contagem de itens da cesta é atualizada
     setAviso(`${quantidade} un. de ${nomeProduto} adicionadas na cesta #${cestaEmFechamento.id}.`);
   };
 
@@ -881,16 +1194,21 @@ export default function App() {
 
     <main id="conteudo" tabIndex="-1">
       {usuario.tipo === 'produtor' ? (
-        <Separacao token={token} abrirFechamento={setCestaEmFechamento} aoExpirar={sair} />
+        tela === 'estoque' ? (
+          <Estoque token={token} aoExpirar={sair} versao={versao}
+            aoCadastrar={(mensagem) => { setVersao((atual) => atual + 1); setAviso(mensagem); }} />
+        ) : (
+          <Separacao token={token} abrirFechamento={setCestaEmFechamento} aoExpirar={sair} versao={versao} />
+        )
       ) : (
         <>
           {tela === 'inicio' && <Inicio pedir={setTamanhoPedido} navegar={setTela} />}
-          {tela === 'cestas' && <MinhasCestas token={token} navegar={setTela} abrirPedido={() => setTamanhoPedido('media')} aoExpirar={sair} />}
+          {tela === 'cestas' && <MinhasCestas token={token} navegar={setTela} abrirPedido={() => setTamanhoPedido('media')} aoExpirar={sair} versao={versao} />}
         </>
       )}
     </main>
 
-    <Rodape navegar={setTela} />
+    <Rodape navegar={setTela} usuario={usuario} />
 
     {/* Janela de confirmação do pedido de cesta */}
     <Janela aberta={Boolean(tamanhoPedido)} aoFechar={() => setTamanhoPedido(null)} classe="order-dialog" titulo="titulo-pedido">
@@ -901,16 +1219,59 @@ export default function App() {
         <span className="dialog-icon"><Icone nome="box" /></span>
         <span className="section-overline">SEU PEDIDO</span>
         <h2 id="titulo-pedido">Confirmar cesta</h2>
-        <p>Veja os detalhes antes de pedir sua cesta semanal.</p>
+        <p>Escolha o tamanho e confira os detalhes antes de pedir sua cesta semanal.</p>
+        {/* Tela 1 da cartilha: a Aline escolhe o tamanho. Os radio de mesmo name formam um grupo
+            em que só um fica marcado; trocar a opção atualiza o tamanhoPedido e o resumo abaixo */}
+        {/* O pedido não depende do estoque: o produtor aprova ou recusa depois */}
+        <fieldset className="size-picker">
+          <legend>Tamanho da cesta</legend>
+          {Object.entries(tamanhos).map(([chave, info]) => (
+            <label key={chave} className={`size-option ${tamanhoPedido === chave ? 'selected' : ''}`}>
+              <input
+                type="radio"
+                name="tamanho-pedido"
+                value={chave}
+                checked={tamanhoPedido === chave}
+                onChange={() => { setTamanhoPedido(chave); setErroPedido(''); }}
+              />
+              <strong>{info.nome}</strong>
+              <span>{`até ${info.limite} itens`}</span>
+            </label>
+          ))}
+        </fieldset>
+        {/* Só para ver: a assinante não escolhe os produtos, quem monta a cesta é o produtor */}
+        <div className="week-produce">
+          <h3>Colhido nesta semana</h3>
+          {!estoquePedido ? (
+            <p className="dialog-hint">{erroPedido ? 'Não foi possível ver o estoque.' : 'Carregando os produtos...'}</p>
+          ) : estoquePedido.itens.some((item) => item.disponivel > 0) ? (
+            <ul>
+              {estoquePedido.itens.filter((item) => item.disponivel > 0).map((item) => (
+                <li key={item.nome_produto}><Icone nome="leaf" /> {item.nome_produto}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="dialog-hint">O produtor ainda não registrou a colheita desta semana.</p>
+          )}
+          <p className="dialog-hint">Os produtos são escolhidos pelo produtor na montagem da cesta.</p>
+        </div>
+        {erroPedido && <p className="dialog-error" role="alert">{erroPedido}</p>}
         <div className="order-summary">
+          <div><span>Semana</span><strong>{textoDaSemana(dataISO(segundaDaSemana()))}</strong></div>
           <div><span>Tamanho</span><strong>{tamanhos[tamanhoPedido]?.nome}</strong></div>
           <div><span>Capacidade</span><strong>{tamanhos[tamanhoPedido]?.limite} itens</strong></div>
           <div><span>Assinante</span><strong>{usuario.nome}</strong></div>
         </div>
-        <p className="dialog-hint">O dono do pedido é autenticado pelo seu token JWT. O produtor receberá seu pedido e registrará os produtos colhidos.</p>
+        <p className="dialog-hint">O dono do pedido é autenticado pelo seu token JWT. O produtor receberá seu pedido e vai aprová-lo ou recusá-lo antes de separar os produtos.</p>
         <div className="dialog-actions">
           <button type="button" className="btn btn-secondary" onClick={() => setTamanhoPedido(null)}>Voltar</button>
-          <button type="button" className="btn btn-primary" onClick={confirmarPedido}>Confirmar pedido <Icone nome="check" /></button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={confirmarPedido}
+          >
+            Confirmar pedido <Icone nome="check" />
+          </button>
         </div>
       </>}
     </Janela>
@@ -920,6 +1281,8 @@ export default function App() {
       {cestaEmFechamento && (
         <FormularioDeProduto
           cesta={cestaEmFechamento}
+          token={token}
+          aoExpirar={sair}
           aoCancelar={() => setCestaEmFechamento(null)}
           aoSalvar={registrarProduto}
         />

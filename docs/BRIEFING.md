@@ -31,6 +31,7 @@ As experiências da assinante e do produtor têm a mesma prioridade: ambas preci
 3. Consultar uma cesta e sua situação.
 4. Listar os produtos separados de uma cesta.
 5. Separar um produto com sua quantidade, respeitando a capacidade da cesta.
+6. Cadastrar a colheita da semana, em unidades, que limita os tamanhos que podem ser pedidos e os produtos que podem ser separados. Pedido do autor, fora da cartilha. ?
 
 ## Quatro telas previstas
 
@@ -53,7 +54,7 @@ As quatro telas devem funcionar tanto no celular quanto no computador.
 - A capacidade considera a soma das quantidades dos produtos separados: **5 itens** na pequena, **8** na média e **12** na grande.
 - Um produto que ultrapassaria a capacidade é recusado.
 - Ao separar o primeiro produto, a situação muda para **em separação**.
-- Nesta etapa, o perfil é escolhido em uma lista, sem senha. A tela da assinante informa quem ela é ao solicitar os próprios dados.
+- Com o login (ciclo 4), cada pessoa entra com e-mail e senha, e o back descobre pelo token quem está pedindo os dados. A assinante vê só as próprias cestas. ?
 
 ## Apresentação da capacidade
 
@@ -61,7 +62,7 @@ Na área do produtor, a capacidade de cada cesta será mostrada por uma **barra 
 
 ## Limites desta etapa
 
-Não fazem parte da solução inicial: pagamento, rota de entrega, estoque em quilos, troca de produto e avisos por mensagem. Os dados ficam em memória nesta fase do curso.
+Não fazem parte da solução inicial: pagamento, rota de entrega, estoque em quilos, troca de produto e avisos por mensagem. Os dados ficam no MySQL (ciclo 2). ?
 
 ## Evolução prevista pela cartilha
 

@@ -1,6 +1,8 @@
 import unittest
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import Mock, patch
+
+import jwt
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, inspect
@@ -21,14 +23,18 @@ from modelos.usuario import Usuario
 from esquemas.usuario import UsuarioCriacao
 from repositorios import usuario as repositorio_usuario
 from servicos import usuario as servico_usuario
-from servicos.excecoes import EmailEmUso, LimiteDaCestaExcedido
+from servicos.excecoes import (CestaIncompleta, CestaNaoEmSeparacao, CestaNaoPedida, EmailEmUso, SemanaForaDoPedido,
+                               EstoqueInsuficiente, LimiteDaCestaExcedido)
+import seguranca
 from seguranca import criar_token, ler_token, verificar_senha
-from rotas.autenticacao import obter_usuario_atual, exigir_assinante, exigir_produtor
+from rotas.autenticacao import obter_usuario_atual
+from seguranca import GRUPOS, tem_permissao  # [NOVO · grupos]
 from sqlalchemy.exc import IntegrityError
 from repositorios import cesta as repositorio_cesta
 from repositorios import produto_separado as repositorio_produto
 from servicos import cesta as servico_cesta
 from servicos import produto_separado as servico_produto
+from servicos import estoque as servico_estoque
 
 
 # Um MySQL vazio e exclusivo isola os testes sem trocar o banco ensinado na aula.
@@ -64,8 +70,32 @@ class TestesBackend(unittest.TestCase):
         self.usuario_atual = Usuario(id=99, nome="Vanderlei", tipo="produtor", email="produtor@example.com")
         app.dependency_overrides[obter_usuario_atual] = lambda: self.usuario_atual
         self.addCleanup(app.dependency_overrides.clear)
+        # Os cenários usam semanas fixas do passado; a trava da semana atual tem teste próprio.
+        patcher = patch.object(servico_cesta, "conferir_semana_do_pedido")
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.cliente = TestClient(app)
         self.addCleanup(self.cliente.close)
+        # As semanas usadas pelos cenários antigos já começam com colheita de sobra,
+        # para que eles continuem testando só a regra do limite.
+        for semana in ["2026-10-05", "2026-10-12"]:
+            self.cadastrar_estoque(semana, "Alface", 500)
+
+    # O produtor (usuário padrão) cadastra a colheita de uma semana.
+    def cadastrar_estoque(self, semana, nome_produto, quantidade):
+        app.dependency_overrides[obter_usuario_atual] = lambda: self.usuario_atual
+        resposta = self.cliente.post("/estoques", json={
+            "semana": semana, "nome_produto": nome_produto, "quantidade": quantidade})
+        self.assertEqual(resposta.status_code, 201)
+        return resposta.json()
+
+    # A assinante pede uma cesta numa semana qualquer e devolve a resposta, sem conferir o status.
+    def pedir(self, assinante_id, semana, tamanho):
+        app.dependency_overrides[obter_usuario_atual] = lambda: Usuario(
+            id=assinante_id, nome="Aline", tipo="assinante", email=f"aline{assinante_id}@example.com")
+        resposta = self.cliente.post("/cestas", json={"semana": semana, "tamanho": tamanho})
+        app.dependency_overrides[obter_usuario_atual] = lambda: self.usuario_atual
+        return resposta
 
     # O auxiliar confere o conteúdo do cadastro usado pelos cenários de cesta.
     def criar_usuario(self, tipo="assinante"):
@@ -79,7 +109,8 @@ class TestesBackend(unittest.TestCase):
         return resposta.json()["id"]
 
     # Cria uma cesta válida. O assinante_id falso no corpo deve ser ignorado: o dono vem do token.
-    def criar_cesta(self, assinante_id, tamanho="pequena"):
+    # Por padrão o produtor já aprova o pedido, porque só uma cesta em separação recebe produtos.
+    def criar_cesta(self, assinante_id, tamanho="pequena", aprovar=True):
         app.dependency_overrides[obter_usuario_atual] = lambda: Usuario(
             id=assinante_id, nome="Aline", tipo="assinante", email=f"aline{assinante_id}@example.com"
         )
@@ -91,7 +122,14 @@ class TestesBackend(unittest.TestCase):
         self.assertEqual(resposta.status_code, 201)
         self.assertEqual(resposta.json()["situacao"], "pedida")
         self.assertEqual(resposta.json()["assinante_id"], assinante_id)
+        if aprovar:
+            self.assertEqual(self.decidir(resposta.json()["id"], "aprovar").status_code, 200)
         return resposta.json()["id"]
+
+    # O produtor aprova, reprova ou conclui uma cesta pelo PATCH.
+    def decidir(self, cesta_id, acao):
+        app.dependency_overrides[obter_usuario_atual] = lambda: self.usuario_atual
+        return self.cliente.patch(f"/cestas/{cesta_id}/{acao}")
 
     # Evita duplicar a montagem da requisição de separação.
     def separar(self, cesta_id, quantidade):
@@ -132,7 +170,7 @@ class TestesBackend(unittest.TestCase):
     def test_criacao_e_recusa_de_cestas(self):
         assinante = self.criar_usuario()
         produtor = self.criar_usuario("produtor")
-        cesta = self.criar_cesta(assinante)
+        cesta = self.criar_cesta(assinante, aprovar=False)
         # Testar tentativa com perfil produtor (deve retornar 403)
         app.dependency_overrides[obter_usuario_atual] = lambda: Usuario(
             id=produtor, nome="Produtor", tipo="produtor", email="produtor@example.com"
@@ -145,6 +183,9 @@ class TestesBackend(unittest.TestCase):
         detalhe = self.cliente.get(f"/cestas/{cesta}").json()
         self.assertEqual(detalhe["quantidade_ocupada"], 0)
         self.assertEqual(detalhe["quantidade_restante"], 5)
+        # O produtor vê o nome de quem pediu, mas não o e-mail nem a senha da assinante.
+        self.assertEqual(detalhe["assinante"], {"id": assinante, "nome": "Aline"})
+        self.assertEqual(self.cliente.get("/cestas").json()[0]["assinante"]["nome"], "Aline")
 
     # A soma deve considerar produtos anteriores e preservar dados após a recusa.
     def test_soma_das_quantidades_e_situacao(self):
@@ -167,7 +208,7 @@ class TestesBackend(unittest.TestCase):
             with self.subTest(tamanho=tamanho):
                 cesta = self.criar_cesta(assinante, tamanho)
                 self.assertEqual(self.separar(cesta, limite + 1).status_code, 409)
-                self.assertEqual(self.cliente.get(f"/cestas/{cesta}").json()["situacao"], "pedida")
+                self.assertEqual(self.cliente.get(f"/cestas/{cesta}").json()["situacao"], "em_separacao")
                 self.assertEqual(self.cliente.get(f"/cestas/{cesta}/produtos").json(), [])
                 self.assertEqual(self.separar(cesta, limite).status_code, 201)
                 detalhe = self.cliente.get(f"/cestas/{cesta}").json()
@@ -217,7 +258,7 @@ class TestesBackend(unittest.TestCase):
     def test_transacao_desfaz_inclusao_ao_falhar(self):
         cesta = self.criar_cesta(self.criar_usuario())
 
-        # Confere que a regra já mudou a cesta, reproduzindo o exercício do slide.
+        # A cesta já está em separação; a falha na gravação não pode deixar produto nenhum.
         def falhar_antes_de_salvar(sessao, cesta_id, dados):
             objeto = sessao.get(Cesta, cesta_id)
             self.assertEqual(objeto.situacao, "em_separacao")
@@ -227,7 +268,7 @@ class TestesBackend(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 self.separar(cesta, 1)
         self.assertEqual(self.cliente.get(f"/cestas/{cesta}/produtos").json(), [])
-        self.assertEqual(self.cliente.get(f"/cestas/{cesta}").json()["situacao"], "pedida")
+        self.assertEqual(self.cliente.get(f"/cestas/{cesta}").json()["situacao"], "em_separacao")
 
     # Mesmo depois de enviar INSERT e UPDATE, falhar antes do commit desfaz ambos.
     def test_rollback_depois_das_gravacoes(self):
@@ -242,7 +283,116 @@ class TestesBackend(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 self.separar(cesta, 1)
         self.assertEqual(self.cliente.get(f"/cestas/{cesta}/produtos").json(), [])
-        self.assertEqual(self.cliente.get(f"/cestas/{cesta}").json()["situacao"], "pedida")
+        self.assertEqual(self.cliente.get(f"/cestas/{cesta}").json()["situacao"], "em_separacao")
+
+    # Cadastrar o mesmo produto de novo na semana soma, e não cria linha repetida.
+    def test_estoque_soma_o_mesmo_produto(self):
+        self.cadastrar_estoque("2026-10-19", "Tomate", 6)
+        segunda = self.cadastrar_estoque("2026-10-19", "Tomate", 4)
+        self.assertEqual(segunda["quantidade"], 10)
+        self.cadastrar_estoque("2026-10-19", "Cenoura", 3)
+        resumo = self.cliente.get("/estoques?semana=2026-10-19").json()
+        self.assertEqual([item["nome_produto"] for item in resumo["itens"]], ["Cenoura", "Tomate"])
+        self.assertEqual(resumo["total_colhido"], 13)
+        self.assertEqual(resumo["tamanhos_liberados"], ["pequena", "media", "grande"])
+        # Outra semana tem o estoque dela: a colheita não passa de uma semana para outra.
+        vazia = self.cliente.get("/estoques?semana=2026-10-26").json()
+        self.assertEqual((vazia["itens"], vazia["tamanhos_liberados"]), ([], []))
+
+    # O pedido não depende do estoque: sem colheita lançada ele entra como pedida.
+    # A reserva só conta as cestas aprovadas (em separação).
+    def test_pedido_sem_estoque_e_reserva_na_aprovacao(self):
+        assinante = self.criar_usuario()
+        pedido = self.pedir(assinante, "2026-10-19", "grande")
+        self.assertEqual(pedido.status_code, 201)
+        self.assertEqual(pedido.json()["situacao"], "pedida")
+        resumo = self.cliente.get("/estoques?semana=2026-10-19").json()
+        self.assertEqual((resumo["total_colhido"], resumo["total_reservado"]), (0, 0))
+        # Aprovar não confere o estoque: o produtor conta com a colheita que ainda vai lançar.
+        self.assertEqual(self.decidir(pedido.json()["id"], "aprovar").status_code, 200)
+        self.cadastrar_estoque("2026-10-19", "Couve", 8)
+        resumo = self.cliente.get("/estoques?semana=2026-10-19").json()
+        self.assertEqual((resumo["total_reservado"], resumo["itens_livres"]), (12, 0))
+        # Cestas recusadas ou só pedidas não reservam nada.
+        recusada = self.pedir(assinante, "2026-10-19", "media").json()["id"]
+        self.assertEqual(self.decidir(recusada, "reprovar").status_code, 200)
+        self.assertEqual(self.cliente.get("/estoques?semana=2026-10-19").json()["total_reservado"], 12)
+
+    # O fluxo do pedido: pedida -> aprovar -> separar -> concluir, e pedida -> reprovar.
+    def test_fluxo_do_pedido(self):
+        assinante = self.criar_usuario()
+        cesta = self.criar_cesta(assinante, aprovar=False)
+        # Cesta pedida ainda não recebe produtos nem pode ser concluída.
+        self.assertEqual(self.separar(cesta, 1).status_code, 409)
+        self.assertEqual(self.decidir(cesta, "concluir").status_code, 409)
+        self.assertEqual(self.decidir(cesta, "aprovar").json()["situacao"], "em_separacao")
+        # Aprovar de novo, ou reprovar depois de aprovada, é recusado.
+        self.assertEqual(self.decidir(cesta, "aprovar").status_code, 409)
+        self.assertEqual(self.decidir(cesta, "reprovar").status_code, 409)
+        # Concluir exige a cesta cheia.
+        self.assertEqual(self.separar(cesta, 4).status_code, 201)
+        incompleta = self.decidir(cesta, "concluir")
+        self.assertEqual(incompleta.status_code, 409)
+        self.assertEqual(incompleta.json()["detail"], "A cesta ainda não está cheia. Faltam 1 itens.")
+        self.assertEqual(self.separar(cesta, 1).status_code, 201)
+        self.assertEqual(self.decidir(cesta, "concluir").json()["situacao"], "concluida")
+        # Concluída não recebe produtos nem muda de situação.
+        self.assertEqual(self.separar(cesta, 1).status_code, 409)
+        self.assertEqual(self.decidir(cesta, "concluir").status_code, 409)
+        # Reprovada fica recusada para sempre e não recebe produtos.
+        outra = self.criar_cesta(assinante, aprovar=False)
+        self.assertEqual(self.decidir(outra, "reprovar").json()["situacao"], "recusada")
+        self.assertEqual(self.separar(outra, 1).status_code, 409)
+        self.assertEqual(self.decidir(outra, "aprovar").status_code, 409)
+        self.assertEqual(self.decidir(999, "aprovar").status_code, 404)
+
+    # Na separação, o produto precisa estar no estoque da semana e ter sobrado o bastante.
+    def test_separacao_confere_o_estoque(self):
+        assinante = self.criar_usuario()
+        self.cadastrar_estoque("2026-10-19", "Beterraba", 6)
+        self.cadastrar_estoque("2026-10-19", "Rúcula", 20)
+        primeira = self.pedir(assinante, "2026-10-19", "pequena").json()["id"]
+        segunda = self.pedir(assinante, "2026-10-19", "media").json()["id"]
+        self.decidir(primeira, "aprovar")
+        self.decidir(segunda, "aprovar")
+
+        def produto(cesta, nome, quantidade):
+            return self.cliente.post(f"/cestas/{cesta}/produtos",
+                                     json={"nome_produto": nome, "quantidade": quantidade})
+
+        recusa = produto(primeira, "Abóbora", 1)
+        self.assertEqual(recusa.status_code, 409)
+        self.assertEqual(recusa.json()["detail"], "Esse produto não foi colhido na semana desta cesta.")
+        self.assertEqual(produto(primeira, "Beterraba", 4).status_code, 201)
+        # Sobraram 2 beterrabas: a segunda cesta não leva 3, mesmo cabendo 8 nela.
+        recusa = produto(segunda, "Beterraba", 3)
+        self.assertEqual(recusa.status_code, 409)
+        self.assertIn("Restam só 2 unidades", recusa.json()["detail"])
+        self.assertEqual(produto(segunda, "Beterraba", 2).status_code, 201)
+        itens = {i["nome_produto"]: i for i in self.cliente.get("/estoques?semana=2026-10-19").json()["itens"]}
+        self.assertEqual((itens["Beterraba"]["separado"], itens["Beterraba"]["disponivel"]), (6, 0))
+        self.assertEqual(itens["Rúcula"]["disponivel"], 20)
+
+    # Uma cesta gravada numa quinta usa o estoque da segunda-feira da mesma semana,
+    # e o filtro semana traz só as cestas daquela semana.
+    def test_semana_vai_de_segunda_a_domingo(self):
+        assinante = self.criar_usuario()
+        self.cadastrar_estoque("2026-10-19", "Tomate", 12)
+        quinta = self.pedir(assinante, "2026-10-22", "pequena")
+        self.assertEqual(quinta.status_code, 201)
+        # O pedido mandou a quinta, e a cesta foi gravada na segunda-feira, como diz o DER.
+        self.assertEqual(quinta.json()["semana"], "2026-10-19")
+        outra = self.criar_cesta(assinante)  # semana 2026-10-05
+        self.decidir(quinta.json()["id"], "aprovar")
+        resposta = self.cliente.post(f"/cestas/{quinta.json()['id']}/produtos",
+                                     json={"nome_produto": "Tomate", "quantidade": 3})
+        self.assertEqual(resposta.status_code, 201)
+        resumo = self.cliente.get("/estoques?semana=2026-10-25").json()  # um domingo da mesma semana
+        self.assertEqual((resumo["semana"], resumo["total_reservado"]), ("2026-10-19", 5))
+        self.assertEqual(resumo["itens"][0]["disponivel"], 9)
+        ids = {c["id"] for c in self.cliente.get("/cestas?semana=2026-10-19").json()}
+        self.assertEqual(ids, {quinta.json()["id"]})
+        self.assertNotIn(outra, ids)
 
     # Semanas fora da ordem de criação e empates devem produzir páginas sem repetição.
     def test_paginacao_e_ordem(self):
@@ -256,7 +406,7 @@ class TestesBackend(unittest.TestCase):
             resposta = self.cliente.post("/cestas", json={"semana": semana, "tamanho": "media"})
             self.assertEqual(resposta.status_code, 201)
             esperados.append((semana, resposta.json()["id"]))
-        esperados.sort()
+        esperados.sort(reverse=True)  # semana mais recente primeiro, e o id maior desempata
         recebidos = []
         app.dependency_overrides[obter_usuario_atual] = lambda: self.usuario_atual
         for pagina, quantidade in [(1, 10), (2, 10), (3, 3), (4, 0)]:
@@ -384,7 +534,7 @@ class TestesSemConexao(unittest.TestCase):
         sql = str(consulta.compile(dialect=mysql.dialect(), compile_kwargs={"literal_binds": True}))
         self.assertIn("cestas.tamanho = 'media'", sql)
         self.assertIn("cestas.assinante_id = 7", sql)
-        self.assertIn("ORDER BY cestas.semana, cestas.id", sql)
+        self.assertIn("ORDER BY cestas.semana DESC, cestas.id DESC", sql)
         self.assertIn("LIMIT 20, 10", sql)
 
     # A primeira página sem filtros ainda deve ter limite e ordem no banco.
@@ -409,29 +559,31 @@ class TestesSemConexao(unittest.TestCase):
         with TestClient(app) as cliente:
             with patch.object(servico_cesta, "listar", return_value=[]) as listar:
                 self.assertEqual(cliente.get("/cestas").status_code, 200)
-                self.assertEqual(listar.call_args.args[1:], (self.usuario_teste, None, None, 1))
-                self.assertEqual(cliente.get("/cestas?tamanho=media&assinante_id=7&pagina=3").status_code, 200)
-                self.assertEqual(listar.call_args.args[1:], (self.usuario_teste, "media", 7, 3))
+                self.assertEqual(listar.call_args.args[1:], (self.usuario_teste, None, None, 1, None))
+                self.assertEqual(cliente.get("/cestas?tamanho=media&assinante_id=7&pagina=3&semana=2026-10-22").status_code, 200)
+                self.assertEqual(listar.call_args.args[1:], (self.usuario_teste, "media", 7, 3, date(2026, 10, 22)))
+                self.assertEqual(cliente.get("/cestas?semana=ontem").status_code, 422)
 
     # O serviço decide o que cada perfil vê: a assinante não escapa do filtro com assinante_id.
     def test_servico_lista_so_as_cestas_da_assinante(self):
         assinante = Usuario(id=2, nome="Aline", tipo="assinante")
         with patch.object(repositorio_cesta, "listar", return_value=[]) as listar:
             servico_cesta.listar(Mock(), assinante, "media", 7, 1)
-            self.assertEqual(listar.call_args.args[1:], ("media", 2, 1))
-            servico_cesta.listar(Mock(), self.usuario_teste, "media", 7, 1)
-            self.assertEqual(listar.call_args.args[1:], ("media", 7, 1))
+            self.assertEqual(listar.call_args.args[1:], ("media", 2, 1, None))
+            # Uma quinta-feira vira a segunda-feira da mesma semana antes de chegar ao repositório.
+            servico_cesta.listar(Mock(), self.usuario_teste, "media", 7, 1, date(2026, 10, 22))
+            self.assertEqual(listar.call_args.args[1:], ("media", 7, 1, date(2026, 10, 19)))
 
     # A regra recusa com exceção, antes de gravar, e não muda a situação.
     def test_regra_do_limite_levanta_excecao(self):
-        cesta = Cesta(id=10, tamanho="pequena", situacao="pedida")
+        cesta = Cesta(id=10, tamanho="pequena", situacao="em_separacao", semana=date(2026, 10, 5))
         cesta.produtos_separados = [ProdutoSeparado(nome_produto="Alface", quantidade=4)]
         dados = Mock(quantidade=2)
         with patch.object(repositorio_produto, "salvar") as salvar:
             with self.assertRaises(LimiteDaCestaExcedido):
                 servico_produto.separar(Mock(), cesta, dados)
             salvar.assert_not_called()
-        self.assertEqual(cesta.situacao, "pedida")
+        self.assertEqual(cesta.situacao, "em_separacao")
 
     # Token com uma letra trocada ou inventado não identifica ninguém: a rota devolve 401.
     def test_token_adulterado_retorna_401(self):
@@ -440,6 +592,13 @@ class TestesSemConexao(unittest.TestCase):
         trocado = token[:-3] + ("AAA" if token[-3:] != "AAA" else "BBB")
         self.assertIsNone(ler_token(trocado))
         self.assertIsNone(ler_token("inventado"))
+        # Assinados com a chave certa, mas sem sub ou com sub que não é número: antes davam 500.
+        validade = datetime.now(timezone.utc) + timedelta(minutes=5)
+        sem_sub = jwt.encode({"exp": validade}, seguranca.configuracao["chave_do_token"], algorithm="HS256")
+        sub_texto = jwt.encode({"sub": "abc", "exp": validade}, seguranca.configuracao["chave_do_token"],
+                               algorithm="HS256")
+        self.assertIsNone(ler_token(sem_sub))
+        self.assertIsNone(ler_token(sub_texto))
         app.dependency_overrides.clear()
         with TestClient(app) as cliente:
             resposta = cliente.get("/cestas", headers={"Authorization": "Bearer inventado"})
@@ -469,13 +628,116 @@ class TestesSemConexao(unittest.TestCase):
                 self.assertEqual(res.status_code, 401)
                 self.assertEqual(res.json()["detail"], "E-mail ou senha incorretos")
 
-    def test_exigir_produtor_recusa_assinante_com_403(self):
+    def test_grupo_assinante_sem_permissao_de_separar_recebe_403(self):
         assinante = Usuario(id=2, nome="Aline", tipo="assinante", email="aline@example.com")
         app.dependency_overrides[obter_usuario_atual] = lambda: assinante
         with TestClient(app) as cliente:
             res = cliente.post("/cestas/1/produtos", json={"nome_produto": "Alface", "quantidade": 1})
             self.assertEqual(res.status_code, 403)
-            self.assertEqual(res.json()["detail"], "Só o produtor pode fazer isso")
+            self.assertEqual(res.json()["detail"], "Seu grupo não pode separar produtos")
+
+    # [NOVO · grupos] A tabela GRUPOS libera para cada persona só as permissões dela.
+    def test_permissoes_de_cada_grupo(self):
+        assinante = Usuario(tipo="assinante")
+        produtor = Usuario(tipo="produtor")
+        for permissao in ["conta:ver", "cestas:pedir", "cestas:ver", "estoque:ver"]:
+            self.assertTrue(tem_permissao(assinante, permissao), permissao)
+        for permissao in ["cestas:ver_todas", "cestas:aprovar", "cestas:concluir",
+                          "produtos:separar", "estoque:cadastrar"]:
+            self.assertFalse(tem_permissao(assinante, permissao), permissao)
+        for permissao in ["conta:ver", "cestas:ver", "cestas:ver_todas", "cestas:aprovar",
+                          "cestas:concluir", "produtos:separar", "estoque:cadastrar", "estoque:ver"]:
+            self.assertTrue(tem_permissao(produtor, permissao), permissao)
+        self.assertFalse(tem_permissao(produtor, "cestas:pedir"))
+
+    # [NOVO · grupos] Um grupo que não está na tabela não tem permissão nenhuma (negar por padrão).
+    def test_grupo_desconhecido_nao_tem_permissao(self):
+        intruso = Usuario(id=3, nome="X", tipo="visitante")
+        self.assertEqual(GRUPOS.get("visitante"), None)
+        app.dependency_overrides[obter_usuario_atual] = lambda: intruso
+        with TestClient(app) as cliente:
+            self.assertEqual(cliente.get("/usuarios/eu").status_code, 403)
+            self.assertEqual(cliente.get("/cestas").status_code, 403)
+            self.assertEqual(cliente.get("/cestas/1").status_code, 403)
+            self.assertEqual(cliente.post("/cestas", json={"semana": "2026-10-05", "tamanho": "pequena"}).status_code, 403)
+
+    # [NOVO · grupos] O grupo produtor não pede cesta: a permissão cestas:pedir é só da assinante.
+    def test_grupo_produtor_sem_permissao_de_pedir_recebe_403(self):
+        with TestClient(app) as cliente:
+            res = cliente.post("/cestas", json={"semana": "2026-10-05", "tamanho": "pequena"})
+            self.assertEqual(res.status_code, 403)
+            self.assertEqual(res.json()["detail"], "Seu grupo não pode pedir cestas")
+
+    # [NOVO · grupos] A assinante vê o estoque, mas não cadastra a colheita.
+    def test_assinante_nao_cadastra_estoque(self):
+        assinante = Usuario(id=2, nome="Aline", tipo="assinante", email="aline@example.com")
+        app.dependency_overrides[obter_usuario_atual] = lambda: assinante
+        with TestClient(app) as cliente:
+            with patch.object(servico_estoque, "cadastrar") as cadastrar:
+                res = cliente.post("/estoques", json={"semana": "2026-10-19", "nome_produto": "Alface", "quantidade": 3})
+                self.assertEqual(res.status_code, 403)
+                self.assertEqual(res.json()["detail"], "Seu grupo não pode cadastrar o estoque")
+                cadastrar.assert_not_called()
+            with patch.object(servico_estoque, "resumo_da_semana", return_value={
+                    "semana": "2026-10-19", "itens": [], "total_colhido": 0, "total_reservado": 0,
+                    "itens_livres": 0, "tamanhos_liberados": []}):
+                self.assertEqual(cliente.get("/estoques?semana=2026-10-19").status_code, 200)
+
+    # Sem a semana, ou com quantidade que não é inteiro positivo, o estoque recusa com 422.
+    def test_estoque_entradas_invalidas(self):
+        with TestClient(app) as cliente:
+            self.assertEqual(cliente.get("/estoques").status_code, 422)
+            with patch.object(servico_estoque, "cadastrar") as cadastrar:
+                base = {"semana": "2026-10-19", "nome_produto": "Alface", "quantidade": 3}
+                for mudanca in [{"quantidade": 0}, {"quantidade": 1.5}, {"quantidade": "2"},
+                                {"nome_produto": "  "}, {"semana": "ontem"}, {"extra": 1}]:
+                    self.assertEqual(cliente.post("/estoques", json={**base, **mudanca}).status_code, 422)
+                cadastrar.assert_not_called()
+
+    # As regras do pedido e do estoque recusam com exceção, antes de gravar.
+    def test_regras_do_pedido_levantam_excecao(self):
+        pedida = Cesta(id=10, tamanho="grande", situacao="pedida", semana=date(2026, 10, 19))
+        pedida.produtos_separados = []
+        with patch.object(repositorio_produto, "salvar") as salvar:
+            with self.assertRaises(CestaNaoEmSeparacao):
+                servico_produto.separar(Mock(), pedida, Mock(nome_produto="Alface", quantidade=1))
+            with self.assertRaises(CestaNaoEmSeparacao):
+                servico_cesta.concluir(Mock(), pedida)
+            salvar.assert_not_called()
+        em_separacao = Cesta(id=11, tamanho="pequena", situacao="em_separacao", semana=date(2026, 10, 19))
+        em_separacao.produtos_separados = [ProdutoSeparado(nome_produto="Alface", quantidade=4)]
+        with patch.object(repositorio_cesta, "atualizar") as atualizar:
+            with self.assertRaises(CestaIncompleta):
+                servico_cesta.concluir(Mock(), em_separacao)
+            with self.assertRaises(CestaNaoPedida):
+                servico_cesta.aprovar(Mock(), em_separacao)
+            with self.assertRaises(CestaNaoPedida):
+                servico_cesta.reprovar(Mock(), em_separacao)
+            atualizar.assert_not_called()
+        self.assertEqual(em_separacao.situacao, "em_separacao")
+        cesta = Cesta(id=12, tamanho="grande", situacao="em_separacao", semana=date(2026, 10, 19))
+        cesta.produtos_separados = []
+        with patch.object(servico_produto, "disponivel_do_produto", return_value=(Mock(nome_produto="Alface"), 2)):
+            with patch.object(repositorio_produto, "salvar") as salvar:
+                with self.assertRaises(EstoqueInsuficiente):
+                    servico_produto.separar(Mock(), cesta, Mock(nome_produto="Alface", quantidade=3))
+                salvar.assert_not_called()
+
+    # O pedido só vale para a semana atual: passada ou futura levanta exceção, e a atual passa.
+    def test_pedido_so_vale_para_a_semana_atual(self):
+        hoje = date.today()
+        servico_cesta.conferir_semana_do_pedido(hoje)
+        for semana in [hoje - timedelta(days=7), hoje + timedelta(days=7)]:
+            with self.assertRaises(SemanaForaDoPedido):
+                servico_cesta.conferir_semana_do_pedido(semana)
+
+    # [NOVO · grupos] A assinante não aprova, reprova nem conclui: recebe 403 antes de qualquer busca.
+    def test_assinante_nao_decide_o_pedido(self):
+        assinante = Usuario(id=2, nome="Aline", tipo="assinante", email="aline@example.com")
+        app.dependency_overrides[obter_usuario_atual] = lambda: assinante
+        with TestClient(app) as cliente:
+            for acao in ["aprovar", "reprovar", "concluir"]:
+                self.assertEqual(cliente.patch(f"/cestas/1/{acao}").status_code, 403, acao)
 
     def test_assinante_acessando_cesta_alheia_retorna_403(self):
         assinante = Usuario(id=2, nome="Aline", tipo="assinante", email="aline@example.com")

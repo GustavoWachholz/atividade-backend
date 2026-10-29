@@ -1,6 +1,6 @@
 # Regras do projeto para a IA
 
-Atualizado até a **aula 9** da UC4. Salve na raiz do repositório da cartilha com o nome `REGRAS.md`,
+Atualizado até a **aula 10** da UC4. Salve na raiz do repositório da cartilha com o nome `REGRAS.md`,
 por cima da versão anterior.
 
 ## O projeto
@@ -9,9 +9,9 @@ por cima da versão anterior.
 - Na raiz: `docs/`, `frontend/`, `backend/` e um `README.md` que diz como rodar o front e o back,
   como montar o banco do zero, quais rotas a API tem, quem pode usar cada uma e como a regra da
   cartilha recusa.
-- `.docs/` é o diário de obra do projeto, para mim e para você, a IA. Tem cinco arquivos:
-  `README.md` (o projeto em dez linhas), `arquitetura.md`, `decisoes.md`, `proximos-passos.md` e
-  `roadmap.md`. Você lê a `.docs/` antes de qualquer tarefa, e atualiza antes de terminar.
+- `.docs/` é o diário de obra do projeto, para mim e para você, a IA. Reúne os arquivos:
+  `README.md` (o projeto em dez linhas), `arquitetura.md`, `decisoes.md`, `proximos-passos.md`,
+  `roadmap.md` e `ia.md`, com a ficha, o pedido e os testes do módulo de IA planejado. Você lê a `.docs/` antes de qualquer tarefa, e atualiza antes de terminar.
 - `docs/` guarda o que não é código:
   - `CARTILHA.md`: a cartilha sorteada, sem alteração. É a fonte do que o sistema precisa fazer.
   - `BRIEFING.md`: o briefing, escrito por mim.
@@ -25,7 +25,8 @@ por cima da versão anterior.
   - `configuracao.py`: o único arquivo que lê o `.env`, com `load_dotenv()` e `os.getenv`.
   - `banco.py`: o `engine`, a fábrica `Sessao`, a classe `Base` e a função `obter_sessao`. Nada mais.
   - `seguranca.py`: `gerar_hash` e `verificar_senha`, com o `pwdlib`, e `criar_token` e `ler_token`,
-    com o PyJWT. Não importa nada do FastAPI.
+    com o PyJWT. Também tem a tabela `GRUPOS` e a função `tem_permissao` (assunto novo, ver o fim
+    deste arquivo). Não importa nada do FastAPI.
   - `criar_tabelas.py`: importa os três modelos e roda `Base.metadata.create_all(engine)`. Rodado à mão
     no terminal, com `python criar_tabelas.py`, e não pelo `main.py`. Serve para o banco vazio.
   - `alembic.ini` e `migracoes/`: a configuração do Alembic, o `env.py` e as migrations em
@@ -35,7 +36,7 @@ por cima da versão anterior.
   - `rotas/<recurso>.py`, no plural: o `APIRouter`, as rotas do recurso e nada mais.
   - `rotas/usuarios.py`: o cadastro, `POST /usuarios`, e o `GET /usuarios/eu`.
   - `rotas/autenticacao.py`: o `POST /login`, o `OAuth2PasswordBearer`, o `obter_usuario_atual` e uma
-    função `exigir_<perfil>` para cada perfil da cartilha.
+    função `exigir_<permissão>` para cada permissão dos grupos (assunto novo, ver o fim deste arquivo).
   - `servicos/<recurso>.py`, no singular: as decisões, as contas e a regra da cartilha, numa função
     com o nome da regra.
   - `servicos/excecoes.py`: uma classe por motivo de recusa da regra, herdando de `Exception`.
@@ -121,6 +122,10 @@ por cima da versão anterior.
 
 ## O que ainda não foi visto, e não deve aparecer
 
+- **O código do módulo de IA.** Nesta etapa ele é só planejamento: a ficha, o pedido testado num chat
+  e o roadmap. Não instale SDK do Gemini, da OpenAI ou de outro provedor, não crie rota, serviço nem
+  chave para a IA, e não escreva `async def` por causa dela. Se eu pedir, lembre que isso é do roadmap.
+
 - `finally`, `else` no `try` e `except Exception` genérico. Pegue só a exceção da regra, pelo nome.
 - Função de repositório que abre a própria sessão com `Sessao()`. Toda sessão vem do `Depends`.
 - `back_populates`, `backref`, `lazy=`, `joinedload`, `selectinload`, `cascade`. O `relationship` simples basta.
@@ -172,6 +177,27 @@ por cima da versão anterior.
 - Escreva curto e com certeza. O que você deduziu sem ver no código leva `?` no fim da linha.
 - Nunca escreva senha, chave do `.env` ou token na `.docs/` nem no README.
 
+## Como ajudar no planejamento
+
+- Explore o briefing para propor funcionalidades com agentes de IA integrados via API
+  de Claude, Gemini, OpenAI ou outro provedor. Cada proposta precisa explicar o valor para
+  um perfil do projeto, os dados e ferramentas necessários e o fluxo de uso.
+- Discuta se basta um agente ou se vários papéis trazem benefício. Não force multiagentes.
+  Registre a responsabilidade e os limites de cada agente e como eles trocam informações.
+- Comece discutindo o problema e o perfil comigo. Faça até três perguntas por rodada e espere
+  minhas respostas antes de propor duas ou três ideias. Eu escolho qual aprofundar.
+- Ajude a construir o prompt com contexto, tarefa, formato e limites. Diferencie os resultados
+  reais dos testes de exemplos ou resultados esperados.
+- Depois dos testes, atualize o briefing com a funcionalidade identificada como planejada.
+  O roadmap é a última etapa: transforme a decisão revisada em tarefas, sem implementar.
+- O briefing e a ficha são meus. Você propõe, marca com `?` o que deduziu, e eu decido.
+- Toda ideia de IA responde: para qual perfil, que dor, o que entra, o que sai, quem confere antes
+  de virar dado, e o que acontece quando a IA erra ou não responde.
+- A IA nunca decide a regra da cartilha, nem faz conta ou data que vira dado sem uma pessoa conferir.
+- Nada de dado pessoal de verdade nos exemplos. Use dado inventado.
+- O roadmap começa pelo MVP: a menor versão que ajuda o usuário. Cada tarefa indica a parte
+  do projeto afetada e como conferir o resultado. Melhorias ficam separadas para depois.
+
 ## Como responder
 
 - Uma coisa por vez. Não adiante etapa que eu não pedi.
@@ -188,3 +214,17 @@ por cima da versão anterior.
 
 Os nomes e restrições das colunas já existentes foram preservados, incluindo Enum e criado_em, para evitar
 mudanças de tabela. A conexão usa URL_DO_BANCO com mysql+mysqlconnector.
+
+## Assunto novo, visto fora das aulas e aprovado por mim: grupos de usuário
+
+- Cada persona da cartilha é um **grupo** (`assinante`, `produtor`), e o nome do grupo é o valor da
+  coluna `tipo` do usuário. Não há tabela de grupos nem migration.
+- `GRUPOS`, em `seguranca.py`, é um dicionário que liga cada grupo a um `set` de permissões no formato
+  `"recurso:ação"`. `tem_permissao(usuario, permissao)` consulta esse dicionário e nega por padrão
+  quando o grupo não está lá.
+- Uma função `exigir_<permissão>` por permissão, em `rotas/autenticacao.py`, levanta `403`. Toda rota
+  protegida usa uma delas no lugar do `obter_usuario_atual`.
+- A pergunta "quais cestas esta pessoa vê" usa a permissão `cestas:ver_todas`, e não o `tipo`.
+- Continua vetado: tabela de papéis e permissões no banco, escopos do OAuth2 (`scopes`, `Security`) e
+  função que devolve função (fábrica `exigir(permissao)`).
+- Todo código desse assunto é marcado com o comentário `# [NOVO · grupos]` e explicado no próprio comentário.

@@ -2,8 +2,9 @@ from banco import Base, engine
 from modelos.usuario import Usuario
 from modelos.cesta import Cesta
 from modelos.produto_separado import ProdutoSeparado
+from modelos.estoque import Estoque
 
-# Os imports registram os três modelos; o banco cesta_do_vale já deve existir.
+# Os imports registram os quatro modelos (o estoque é o quarto); o banco cesta_do_vale já deve existir.
 if __name__ == "__main__":
     Base.metadata.create_all(bind=engine)
     print(f"Tabelas criadas ou já existentes no banco {engine.url.database}.")

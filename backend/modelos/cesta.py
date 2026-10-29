@@ -14,9 +14,15 @@ class Cesta(Base):
     assinante_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
     semana = Column(Date, nullable=False)
     tamanho = Column(Enum("pequena", "media", "grande", name="tamanho_cesta"), nullable=False)
-    situacao = Column(Enum("pedida", "em_separacao", name="situacao_cesta"),
+    # O fluxo do pedido: pedida -> (produtor aprova) em_separacao -> (produtor conclui) concluida,
+    # ou pedida -> (produtor reprova) recusada. Os valores novos ficam no fim da lista para as
+    # cestas já gravadas continuarem válidas.
+    situacao = Column(Enum("pedida", "em_separacao", "concluida", "recusada", name="situacao_cesta"),
                       nullable=False, server_default="pedida")
     # DateTime e Enum preservam as colunas existentes; não exigem alterar tabelas.
     criado_em = Column(DateTime, nullable=False, server_default=func.current_timestamp())
     # relationship é o atalho Python para a filha; ForeignKey é a restrição no banco.
     produtos_separados = relationship("ProdutoSeparado")
+    # O mesmo atalho no outro sentido: cesta.assinante lê o usuário dono pela assinante_id,
+    # para a tela do produtor mostrar o nome, e não só o número. Não cria coluna.
+    assinante = relationship("Usuario")

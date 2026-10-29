@@ -1,0 +1,12 @@
+# atende na porta 80, sem domínio e sem HTTPS
+:80 {
+    # handle_path tira o /api: /api/cestas chega como /cestas
+    handle_path /api/* {
+        reverse_proxy api:8000
+    }
+    # o resto são os arquivos do build do React
+    handle {
+        root * /srv
+        file_server
+    }
+}

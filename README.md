@@ -9,8 +9,8 @@ no chute. O sistema organiza o pedido e a separação, respeitando o limite de i
 
 | Perfil | Quem é | O que faz | Onde usa |
 | --- | --- | --- | --- |
-| `assinante` | Aline | pede a cesta da semana, vê as cestas dela e o que foi separado | celular |
-| `produtor` | Vanderlei | vê todas as cestas com filtro por tamanho e separa os produtos | computador |
+| `assinante` | Aline | pede a cesta da semana, vê o que foi colhido, as cestas dela e o que foi separado | celular |
+| `produtor` | Vanderlei | cadastra a colheita da semana, vê todas as cestas com filtro por tamanho e separa os produtos | computador |
 
 ## Como rodar o back
 
@@ -56,7 +56,7 @@ python criar_tabelas.py
 alembic stamp head
 ```
 
-O `criar_tabelas.py` cria as três tabelas já na versão final, e o `alembic stamp head` avisa o Alembic que
+O `criar_tabelas.py` cria as quatro tabelas já na versão final (as três da cartilha e o `estoques`), e o `alembic stamp head` avisa o Alembic que
 o banco está na última migration. Quem já tem o banco de uma versão anterior roda só `alembic upgrade head`.
 Para conferir: `alembic current` deve terminar em `(head)`.
 
@@ -83,6 +83,8 @@ A tela de login do front também tem a opção de cadastro. Depois:
 
 1. No `/docs`, clique em **Authorize**: o e-mail em `username` e a senha em `password`.
 2. No front, entre com cada perfil. A assinante cai em **Minhas cestas**, e o produtor em **A separação**.
+   Antes de pedir uma cesta, entre como produtor e cadastre a colheita da semana em **O estoque**:
+   sem estoque, nenhum tamanho fica liberado.
 3. Testes automatizados: `python testar_backend.py`, dentro de `backend/`. Os testes de banco só rodam
    com `URL_DO_BANCO_TESTE` preenchida, e os outros rodam sem MySQL.
 
@@ -95,22 +97,45 @@ Sem ele, ou com o token inválido ou vencido (60 minutos), a resposta é **401**
 | --- | --- | --- | --- | --- | --- |
 | POST | `/usuarios` | cadastra um usuário, com a senha em hash | qualquer pessoa | 201 | 409 e-mail já cadastrado · 422 dados inválidos |
 | POST | `/login` | troca e-mail e senha por um token JWT | qualquer pessoa | 200 | 401 e-mail ou senha incorretos · 422 formulário incompleto |
-| GET | `/usuarios/eu` | mostra quem está logado | logado | 200 | 401 |
-| POST | `/cestas` | pede a cesta da semana. O dono vem do token | assinante | 201 | 401 · 403 não é assinante · 422 dados inválidos |
-| GET | `/cestas` | lista as cestas, com filtros `tamanho`, `assinante_id` e `pagina` | logado: a assinante vê só as dela, e o produtor vê todas | 200 | 401 · 422 filtro inválido |
-| GET | `/cestas/{cesta_id}` | mostra a cesta, com o limite e quanto ainda cabe | produtor, ou a assinante dona | 200 | 401 · 403 cesta de outra pessoa · 404 cesta não existe |
-| GET | `/cestas/{cesta_id}/produtos` | lista os produtos separados da cesta | produtor, ou a assinante dona | 200 | 401 · 403 cesta de outra pessoa · 404 cesta não existe |
-| POST | `/cestas/{cesta_id}/produtos` | separa um produto na cesta, aplicando a regra | produtor | 201 | 401 · 403 não é produtor · 404 cesta não existe · 409 passa do limite · 422 dados inválidos |
+| GET | `/usuarios/eu` | mostra quem está logado | grupos com `conta:ver`: assinante e produtor | 200 | 401 · 403 sem permissão |
+| POST | `/cestas` | pede a cesta da semana. O dono vem do token | grupo com `cestas:pedir`: assinante | 201 | 401 · 403 sem permissão · 409 semana que não é a atual · 422 dados inválidos |
+| GET | `/cestas` | lista as cestas, 10 por página e da semana mais recente para a mais antiga, com filtros `tamanho`, `assinante_id`, `pagina` e `semana` (qualquer dia; traz a semana de segunda a domingo) | grupos com `cestas:ver`. Sem `cestas:ver_todas`, a assinante vê só as dela | 200 | 401 · 403 sem permissão · 422 filtro inválido |
+| GET | `/cestas/{cesta_id}` | mostra a cesta, com o limite e quanto ainda cabe | produtor, ou a assinante dona | 200 | 401 · 403 sem permissão ou cesta de outra pessoa · 404 cesta não existe |
+| GET | `/cestas/{cesta_id}/produtos` | lista os produtos separados da cesta | produtor, ou a assinante dona | 200 | 401 · 403 sem permissão ou cesta de outra pessoa · 404 cesta não existe |
+| POST | `/cestas/{cesta_id}/produtos` | separa um produto na cesta, aplicando a regra | grupo com `produtos:separar`: produtor | 201 | 401 · 403 sem permissão · 404 cesta não existe · 409 cesta fora de separação, passa do limite, produto fora do estoque ou estoque insuficiente · 422 dados inválidos |
+| PATCH | `/cestas/{cesta_id}/aprovar` | aprova o pedido: a cesta pedida passa para `em_separacao` | grupo com `cestas:aprovar`: produtor | 200 | 401 · 403 sem permissão · 404 cesta não existe · 409 a cesta não está pedida |
+| PATCH | `/cestas/{cesta_id}/reprovar` | reprova o pedido: a cesta pedida passa para `recusada` | grupo com `cestas:aprovar`: produtor | 200 | 401 · 403 sem permissão · 404 cesta não existe · 409 a cesta não está pedida |
+| PATCH | `/cestas/{cesta_id}/concluir` | conclui a cesta em separação, quando está cheia | grupo com `cestas:concluir`: produtor | 200 | 401 · 403 sem permissão · 404 cesta não existe · 409 não está em separação, ou não está cheia |
+| POST | `/estoques` | cadastra um produto colhido na semana. Se ele já está na semana, soma a quantidade | grupo com `estoque:cadastrar`: produtor | 201 | 401 · 403 sem permissão · 422 dados inválidos |
+| GET | `/estoques?semana=` | mostra o estoque da semana: colhido, separado e disponível de cada produto, e os tamanhos liberados | grupos com `estoque:ver`: assinante e produtor | 200 | 401 · 403 sem permissão · 422 semana ausente ou inválida |
 
 **401 ou 403?** O 401 responde "quem é você?": falta o token, ou ele não vale. O 403 responde "você pode fazer isto?":
-o usuário foi identificado, mas o perfil não permite, ou a cesta não é dele.
+o usuário foi identificado, mas o grupo dele não tem a permissão, ou a cesta não é dele.
+
+**Grupos:** cada persona é um grupo (o `tipo` do usuário), com um conjunto de permissões definido em `GRUPOS`, no
+`backend/seguranca.py`. A tabela completa está em [.docs/arquitetura.md](.docs/arquitetura.md).
 
 ## A regra
 
-- A cesta nova começa como **pedida**.
+- O pedido funciona como num app de entrega: a assinante pede, o produtor **aprova** ou **reprova**, e só a cesta aprovada
+  entra em separação. Fluxo: `pedida` → `em_separacao` → `concluida`, ou `pedida` → `recusada`.
+- O pedido vale só para a **semana atual**: outra semana, passada ou futura, responde **409**.
+- A cesta nova começa como **pedida**, mesmo sem estoque lançado: o pedido não confere o estoque.
 - O tamanho define o limite de itens, somando as quantidades: pequena **5**, média **8**, grande **12**.
 - O produto que faria a soma passar do limite é recusado com **409**, e a mensagem diz quantos itens ainda cabem.
-- O primeiro produto separado muda a situação para **em separação**. A mudança e o produto são gravados no mesmo commit.
+- Só a cesta **em separação** (aprovada) recebe produtos. Pedida, recusada ou concluída respondem **409**.
+- O produtor **conclui** a cesta quando a soma chega ao limite do tamanho. Cesta pela metade responde **409**.
+- Duas separações da mesma semana, ao mesmo tempo, entram uma de cada vez: a segunda espera a primeira gravar e só
+  então confere o limite e o estoque.
+
+### O estoque (pedido do autor, fora da cartilha)
+
+- O produtor cadastra quantas **unidades** de cada produto colheu na semana (a cartilha deixa de fora o estoque em quilos).
+- **No pedido e na aprovação:** o estoque não é conferido. O produtor pode aprovar contando com a colheita que ainda
+  vai lançar. O resumo do estoque mostra, só como informação, o total colhido e o reservado pelas cestas em separação.
+- **Na separação:** o produto precisa ter sido colhido na semana da cesta, e a quantidade não pode passar do que
+  sobrou dele depois das outras cestas. Se passar, a resposta é **409**.
+- A assinante vê os produtos colhidos na semana ao pedir, só para consulta: quem escolhe os produtos é o produtor.
 
 ## Estrutura
 
@@ -126,8 +151,8 @@ backend/
 ├── servicos/            as regras e as exceções de recusa
 ├── repositorios/        as consultas ao banco
 ├── esquemas/            os esquemas Pydantic de entrada e de saída
-└── modelos/             os modelos SQLAlchemy das três tabelas
-frontend/                o React: login, telas da assinante e do produtor
+└── modelos/             os modelos SQLAlchemy das quatro tabelas
+frontend/                o React: login, telas da assinante e do produtor (separação e estoque)
 docs/                    cartilha, briefing, DER, styleguide e marca
 .docs/                   o diário do projeto: arquitetura, decisões e próximos passos
 ```
