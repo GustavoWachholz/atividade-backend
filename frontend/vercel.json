@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "source": "/api/:caminho*", "destination": "https://atividade-backend-green.vercel.app/:caminho*" }
+  ]
+}
