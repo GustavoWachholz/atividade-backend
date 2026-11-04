@@ -82,7 +82,7 @@ Um banco novo não tem usuários. Cadastre um de cada perfil no `/docs`, em `POS
 A tela de login do front também tem a opção de cadastro. Depois:
 
 1. No `/docs`, clique em **Authorize**: o e-mail em `username` e a senha em `password`.
-2. No front, entre com cada perfil. A assinante cai em **Minhas cestas**, e o produtor em **A separação**.
+2. No front, entre com cada perfil. A assinante cai no **Início**, e o produtor em **A separação**.
    Antes de pedir uma cesta, entre como produtor e cadastre a colheita da semana em **O estoque**:
    sem estoque, nenhum tamanho fica liberado.
 3. Testes automatizados: `python testar_backend.py`, dentro de `backend/`. Os testes de banco só rodam

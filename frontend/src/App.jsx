@@ -1075,9 +1075,9 @@ export default function App() {
       })
       .then((dados) => {
         setUsuario(dados);
-        // Produtor entra diretamente na separação
+        // Produtor entra diretamente na separação, e a assinante no início
         if (dados.tipo === 'produtor') setTela('separacao');
-        else setTela('cestas');
+        else setTela('inicio');
       })
       .catch(() => {
         localStorage.removeItem('token');
