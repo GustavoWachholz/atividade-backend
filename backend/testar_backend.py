@@ -9,12 +9,14 @@ from sqlalchemy import create_engine, inspect
 from sqlalchemy.dialects import mysql
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import NullPool
 
 # A configuração continua lendo o ambiente; a URL fictícia só permite testes sem conexão.
 import configuracao
 
 with patch.object(configuracao, "URL_DO_BANCO", configuracao.URL_DO_BANCO or
                   "mysql+mysqlconnector://teste@localhost/cesta_do_vale"):
+    import banco
     from banco import Base, obter_sessao
 from main import app
 from modelos.cesta import Cesta
@@ -511,6 +513,10 @@ class TestesSemConexao(unittest.TestCase):
         app.dependency_overrides.clear()
         with TestClient(app) as cliente:
             self.assertEqual(cliente.get("/usuarios").status_code, 405)
+
+    # Em ambiente serverless, conexão guardada lota o limite do pooler do Supabase.
+    def test_conexoes_nao_ficam_guardadas(self):
+        self.assertIsInstance(banco.engine.pool, NullPool)
 
     # Usuário antigo, sem senha, não consegue entrar.
     def test_usuario_sem_senha_nao_autentica(self):
