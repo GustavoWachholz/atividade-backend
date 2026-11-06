@@ -41,8 +41,7 @@ def obter_usuario_atual(token: str = Depends(esquema_oauth),
 # Uma função exigir_ por PERMISSÃO, no lugar das antigas exigir_assinante e exigir_produtor.
 # Cada uma depende da obter_usuario_atual (sem token, 401) e consulta a tabela GRUPOS do
 # seguranca.py. Se o grupo não tem a permissão, devolve 403: a pessoa provou quem é, mas não pode.
-# Usamos uma função por permissão, e não uma "fábrica" exigir(permissao), para seguir o molde
-# do curso: o REGRAS veta função que devolve função.
+# Usamos uma função por permissão, e não uma "fábrica" exigir(permissao), por ser direto de ler.
 
 # [NOVO · grupos] GET /usuarios/eu: os dois grupos podem ver a própria conta.
 def exigir_ver_conta(usuario=Depends(obter_usuario_atual)):
@@ -84,6 +83,13 @@ def exigir_aprovar_cesta(usuario=Depends(obter_usuario_atual)):
 def exigir_concluir_cesta(usuario=Depends(obter_usuario_atual)):
     if not tem_permissao(usuario, "cestas:concluir"):
         raise HTTPException(status_code=403, detail="Seu grupo não pode concluir cestas")
+    return usuario
+
+
+# [NOVO · grupos] POST /cestas/pre-preenchimento: só o produtor pede a sugestão da IA.
+def exigir_pre_preencher(usuario=Depends(obter_usuario_atual)):
+    if not tem_permissao(usuario, "cestas:pre_preencher"):
+        raise HTTPException(status_code=403, detail="Seu grupo não pode pedir a sugestão da IA")
     return usuario
 
 

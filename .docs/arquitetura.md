@@ -41,7 +41,8 @@ A trava é solta no commit, ou quando a sessão fecha sem commit (recusa).
 | `cestas:ver_todas` | vê as cestas de qualquer assinante | não | sim |
 | `cestas:aprovar` | `PATCH /cestas/{id}/aprovar` e `/reprovar` | não | sim |
 | `cestas:concluir` | `PATCH /cestas/{id}/concluir` | não | sim |
-| `produtos:separar` | `POST /cestas/{id}/produtos` | não | sim |
+| `cestas:pre_preencher` | `POST /cestas/pre-preenchimento` | não | sim |
+| `produtos:separar` | `POST /cestas/{id}/produtos` e `POST /cestas/pre-preenchimento/confirmar` | não | sim |
 | `estoque:cadastrar` | `POST /estoques` | não | sim |
 | `estoque:ver` | `GET /estoques` | sim | sim |
 
@@ -58,6 +59,16 @@ O grupo é o valor de `usuarios.tipo`. As permissões ficam em `GRUPOS`, no `seg
 | repositório | `repositorios/estoque.py`, e `listar_da_semana` em `cesta.py` e `produto_separado.py` | as consultas por semana, e o `travar_semana`, chamado no começo da separação |
 | exceções | `servicos/excecoes.py` | `EstoqueInsuficiente` (separação) e as do fluxo do pedido: `CestaNaoPedida`, `CestaNaoEmSeparacao` e `CestaIncompleta`. Todas viram 409 na rota |
 
+## O pré-preenchimento com IA
+
+| Camada | Arquivo | O que faz |
+| --- | --- | --- |
+| rota | `rotas/pre_preenchimento.py` | a sugestão (não grava) e a confirmação |
+| serviço | `servicos/pre_preenchimento.py` | `sugerir`, `confirmar`, `conferir_itens` (sem banco) e `chamar_modelo`, a única função que fala com o Gemini |
+| repositório | `salvar_varios` em `produto_separado.py`, `encerrar_leitura` em `cesta.py` | grava num commit só, e solta a conexão antes da chamada ao modelo |
+
+A sugestão não trava nada. Só a confirmação trava a semana, confere de novo e grava.
+
 ## As telas do front (`frontend/src/App.jsx`)
 
 | Tela | Perfil | Componente |
@@ -66,6 +77,7 @@ O grupo é o valor de `usuarios.tipo`. As permissões ficam em `GRUPOS`, no `seg
 | Início e Pedir a cesta (janela de confirmação) | assinante | `Inicio` e a `Janela` do pedido |
 | Minhas cestas, com os produtos separados | assinante | `MinhasCestas` |
 | A separação, com seletor de semana, filtro por tamanho e por assinante (pelo nome na cesta) | produtor | `Separacao`, com o `SeletorDeSemana` |
+| O rascunho da IA, editável, dentro da separação | produtor | `RascunhoDaIa` |
 | O fechamento (formulário que separa um produto, escolhido do estoque da semana da cesta, com a previsão da capacidade) | produtor | `FormularioDeProduto`, numa `Janela` |
 | O estoque (cadastro da colheita, semana a semana) | produtor | `Estoque`, com o `SeletorDeSemana` |
 

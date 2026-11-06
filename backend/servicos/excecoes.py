@@ -27,3 +27,15 @@ class EstoqueInsuficiente(Exception):
 
 class SemanaForaDoPedido(Exception):
     """O pedido só vale para a semana atual."""
+
+
+class IaIndisponivel(Exception):
+    """O modelo não respondeu, a resposta veio fora do formato ou falta a chave."""
+
+
+class NadaParaPreencher(Exception):
+    """A semana não tem cesta aprovada com espaço, ou não tem estoque disponível."""
+
+
+class ConfirmacaoRecusada(Exception):
+    """Um item do rascunho conflita com a cesta ou com o estoque, e nada foi gravado."""

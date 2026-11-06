@@ -96,4 +96,4 @@ SHOW CREATE TABLE produtos_separados;
 
 O último comando deve mostrar a chave estrangeira `cesta_id` apontando para `cestas.id`.
 `create_all` cria tabelas ausentes, mas não altera as existentes. Se a estrutura já
-criada for diferente, preserve os dados e trate a mudança na aula de migrations.
+criada for diferente, preserve os dados e trate a mudança com uma migration.

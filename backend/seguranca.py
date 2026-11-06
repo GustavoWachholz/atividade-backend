@@ -61,6 +61,7 @@ def ler_token(token: str):
 #   cestas:ver_todas   ver as cestas de qualquer assinante. Sem ela, vê só as próprias
 #   cestas:aprovar     PATCH /cestas/{id}/aprovar e /reprovar (decidir o pedido)
 #   cestas:concluir    PATCH /cestas/{id}/concluir
+#   cestas:pre_preencher  POST /cestas/pre-preenchimento (pedir a sugestão da IA)
 #   produtos:separar   POST /cestas/{id}/produtos
 #   estoque:cadastrar  POST /estoques (a colheita da semana)
 #   estoque:ver        GET /estoques (o que há na semana, e quais tamanhos estão liberados)
@@ -71,6 +72,7 @@ GRUPOS = {
     "assinante": {"conta:ver", "cestas:pedir", "cestas:ver", "estoque:ver"},
     # Vanderlei: vê todas as cestas, separa os produtos e cadastra a colheita.
     "produtor": {"conta:ver", "cestas:ver", "cestas:ver_todas", "cestas:aprovar", "cestas:concluir",
+                 "cestas:pre_preencher",
                  "produtos:separar", "estoque:cadastrar", "estoque:ver"},
 }
 

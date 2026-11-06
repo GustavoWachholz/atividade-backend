@@ -535,6 +535,167 @@ function MinhasCestas({ token, navegar, abrirPedido, aoExpirar, versao }) {
 }
 
 // Tela de Separação do Produtor (Vanderlei)
+// A frase padrão quando a IA falha. Um erro do servidor do Vercel nem sempre vem em JSON, então fica aqui também.
+const FALHA_DA_IA = 'Não foi possível gerar a sugestão. Você pode separar manualmente.';
+
+// As duas chamadas do pré-preenchimento. O detail traz a frase que o back escreveu para a tela.
+function enviarPrePreenchimento(token, caminho, corpo, aoExpirar, mensagemPadrao) {
+  return fetch(`${URL_DA_API}/cestas/pre-preenchimento${caminho}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    body: JSON.stringify(corpo)
+  }).then((res) => {
+    if (res.status === 401) { aoExpirar(); throw new Error('Sua sessão expirou. Entre de novo.'); }
+    return res.json().catch(() => ({})).then((dados) => {
+      if (!res.ok) throw new Error(typeof dados.detail === 'string' ? dados.detail : mensagemPadrao);
+      return dados;
+    });
+  });
+}
+
+// Uma quantidade do rascunho só vale inteira e a partir de 1. O campo vazio, durante a digitação, não vale.
+function quantidadeValida(valor) {
+  const numero = Number(valor);
+  return valor !== '' && Number.isInteger(numero) && numero >= 1;
+}
+
+// Soma o que está no rascunho por produto, em todas as cestas, para mostrar o que sobra do estoque.
+function somarPorProduto(cestas) {
+  const soma = {};
+  cestas.forEach((cesta) => cesta.itens.forEach((item) => {
+    soma[item.produto] = (soma[item.produto] || 0) + (quantidadeValida(item.quantidade) ? Number(item.quantidade) : 0);
+  }));
+  return soma;
+}
+
+function somarCesta(cesta) {
+  return cesta.itens.reduce((total, item) => total + (quantidadeValida(item.quantidade) ? Number(item.quantidade) : 0), 0);
+}
+
+// O rascunho que a IA sugeriu. Nada aqui está gravado: o produtor ajusta e só o botão Confirmar grava.
+// A conferência da tela só ajuda a corrigir antes de enviar; quem decide é o back, de novo, na confirmação.
+function RascunhoDaIa({ rascunho, setRascunho, aoConfirmar, aoDescartar, confirmando, erro }) {
+  const { cestas, estoque, descartados, cestas_pedidas: cestasPedidas } = rascunho;
+  const usados = somarPorProduto(cestas);
+  const sobra = (nome, disponivel) => disponivel - (usados[nome] || 0);
+  const totalDeItens = cestas.reduce((total, cesta) => total + cesta.itens.length, 0);
+  const estoqueEstourado = estoque.some((produto) => sobra(produto.nome_produto, produto.disponivel) < 0);
+  const cestaEstourada = cestas.some((cesta) => somarCesta(cesta) > cesta.espaco_livre);
+  const quantidadeRuim = cestas.some((cesta) => cesta.itens.some((item) => !quantidadeValida(item.quantidade)));
+  const podeConfirmar = totalDeItens > 0 && !estoqueEstourado && !cestaEstourada && !quantidadeRuim;
+
+  // Troca só a cesta alterada e mantém o resto do rascunho
+  const mudarItens = (cestaId, novosItens) => setRascunho({
+    ...rascunho,
+    cestas: cestas.map((cesta) => (cesta.cesta_id === cestaId ? { ...cesta, itens: novosItens(cesta.itens) } : cesta))
+  });
+
+  return <section className="draft-panel" aria-labelledby="titulo-rascunho">
+    <div className="draft-heading">
+      <div>
+        <span className="section-overline">SUGESTÃO DA IA</span>
+        <h2 id="titulo-rascunho">Rascunho das cestas</h2>
+        <p>Nada foi gravado ainda. Revise, ajuste o que precisar e confirme.</p>
+      </div>
+      <div className="draft-actions">
+        <button type="button" className="btn btn-secondary" onClick={aoDescartar} disabled={confirmando}>
+          Descartar
+        </button>
+        <button type="button" className="btn btn-primary" onClick={aoConfirmar} disabled={!podeConfirmar || confirmando}>
+          {confirmando ? 'Gravando...' : 'Confirmar'} <Icone nome="check" />
+        </button>
+      </div>
+    </div>
+
+    {cestasPedidas > 0 && (
+      <p className="draft-note">
+        <Icone nome="info" />
+        {cestasPedidas === 1 ? '1 cesta ainda não aprovada ficou' : `${cestasPedidas} cestas ainda não aprovadas ficaram`} fora da sugestão.
+      </p>
+    )}
+    {descartados.length > 0 && (
+      <div className="draft-note draft-discarded">
+        <Icone nome="info" />
+        <div>
+          <strong>A IA sugeriu itens que não puderam entrar, e o espaço ficou vazio:</strong>
+          <ul>
+            {descartados.map((item, indice) => (
+              <li key={indice}>Cesta #{item.cesta_id}: {item.quantidade} × {item.produto}. {item.motivo}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    )}
+
+    <div className="draft-stock" aria-label="O que sobra do estoque com este rascunho">
+      {estoque.map((produto) => {
+        const resto = sobra(produto.nome_produto, produto.disponivel);
+        return <span key={produto.nome_produto} className={resto < 0 ? 'draft-stock-over' : ''}>
+          {produto.nome_produto}: <strong>sobra {resto}</strong>
+        </span>;
+      })}
+    </div>
+
+    <div className="workspace-list">
+      {cestas.map((cesta) => {
+        const soma = somarCesta(cesta);
+        const estourada = soma > cesta.espaco_livre;
+        const opcoes = estoque.filter((produto) => sobra(produto.nome_produto, produto.disponivel) > 0
+          && !cesta.itens.some((item) => item.produto === produto.nome_produto));
+        return <article className="producer-entry" key={cesta.cesta_id}>
+          <h3 className="entry-title">Cesta {tamanhos[cesta.tamanho]?.nome.toLowerCase()} #{cesta.cesta_id}</h3>
+          <p className="entry-person">Assinante: <strong>{cesta.assinante}</strong></p>
+          <p className={estourada ? 'draft-capacity draft-capacity-over' : 'draft-capacity'}>
+            {soma} de {cesta.espaco_livre} {cesta.espaco_livre === 1 ? 'espaço livre usado' : 'espaços livres usados'}
+          </p>
+          {cesta.itens.length === 0 && <p className="entry-empty">Nenhum produto sugerido. O espaço fica vazio.</p>}
+          {cesta.itens.map((item, indice) => (
+            <div className="draft-row" key={item.produto}>
+              <label htmlFor={`qtd-${cesta.cesta_id}-${indice}`}>{item.produto}</label>
+              <input
+                id={`qtd-${cesta.cesta_id}-${indice}`}
+                type="number"
+                min="1"
+                step="1"
+                value={item.quantidade}
+                aria-invalid={!quantidadeValida(item.quantidade)}
+                onChange={(e) => mudarItens(cesta.cesta_id, (itens) => itens.map((atual, i) => (
+                  i === indice ? { ...atual, quantidade: e.target.value } : atual)))}
+              />
+              <button type="button" className="draft-remove" aria-label={`Tirar ${item.produto} da cesta #${cesta.cesta_id}`}
+                onClick={() => mudarItens(cesta.cesta_id, (itens) => itens.filter((_, i) => i !== indice))}>
+                <Icone nome="x" />
+              </button>
+            </div>
+          ))}
+          {opcoes.length > 0 && soma < cesta.espaco_livre && (
+            <label className="draft-add">
+              Acrescentar produto
+              <select value="" onChange={(e) => mudarItens(cesta.cesta_id, (itens) => [
+                ...itens, { produto: e.target.value, quantidade: 1 }])}>
+                <option value="">Escolha um produto</option>
+                {opcoes.map((produto) => (
+                  <option key={produto.nome_produto} value={produto.nome_produto}>{produto.nome_produto}</option>
+                ))}
+              </select>
+            </label>
+          )}
+        </article>;
+      })}
+    </div>
+
+    {!podeConfirmar && (
+      <p className="draft-hint" role="status">
+        {quantidadeRuim ? 'Corrija as quantidades: use números inteiros, a partir de 1.'
+          : cestaEstourada ? 'Alguma cesta passou do espaço livre.'
+            : estoqueEstourado ? 'Algum produto passou do que há no estoque.'
+              : 'Acrescente ao menos um produto para confirmar.'}
+      </p>
+    )}
+    {erro && <div className="dialog-error">{erro}</div>}
+  </section>;
+}
+
 function Separacao({ token, abrirFechamento, aoExpirar, versao }) {
   const [cestas, setCestas] = useState([]);
   const [tamanho, setTamanho] = useState('todas');
@@ -549,6 +710,12 @@ function Separacao({ token, abrirFechamento, aoExpirar, versao }) {
   const [assinante, setAssinante] = useState(null);
   // Id da cesta com um PATCH em andamento: desliga os botões dela para não decidir duas vezes.
   const [decidindo, setDecidindo] = useState(null);
+  // O rascunho da IA fica só na tela: recarregar a página perde o rascunho, e nada foi gravado.
+  const [rascunho, setRascunho] = useState(null);
+  const [sugerindo, setSugerindo] = useState(false);
+  const [confirmando, setConfirmando] = useState(false);
+  const [erroDaIa, setErroDaIa] = useState('');
+  const [avisoDaIa, setAvisoDaIa] = useState('');
 
   // Aprova, reprova ou conclui; depois busca a lista de novo para a cesta mudar de situação na tela.
   const decidir = (cesta, acao) => {
@@ -589,8 +756,48 @@ function Separacao({ token, abrirFechamento, aoExpirar, versao }) {
     carregarTodasCestas();
   }, [token, tamanho, versao, pagina, semana, assinante]);
 
-  // Trocar de semana volta para a primeira página, como trocar o filtro de tamanho
-  const mudarSemana = (nova) => { setSemana(nova); setPagina(1); };
+  // Pede a sugestão da semana selecionada. A resposta é um rascunho: nada foi gravado.
+  const pedirSugestao = () => {
+    setSugerindo(true);
+    setErroDaIa('');
+    setAvisoDaIa('');
+    enviarPrePreenchimento(token, '', { semana }, aoExpirar, FALHA_DA_IA)
+      .then(setRascunho)
+      .catch((err) => setErroDaIa(err.message))
+      .finally(() => setSugerindo(false));
+  };
+
+  // O clique que confere: manda os itens revisados, e o back grava tudo ou nada.
+  // Se o back recusar, o rascunho continua na tela para o produtor ajustar.
+  const confirmarRascunho = () => {
+    const itens = rascunho.cestas.flatMap((cesta) => cesta.itens.map((item) => ({
+      cesta_id: cesta.cesta_id, produto: item.produto, quantidade: Number(item.quantidade)
+    })));
+    setConfirmando(true);
+    setErroDaIa('');
+    enviarPrePreenchimento(token, '/confirmar', { semana: rascunho.semana, itens }, aoExpirar,
+      'Não foi possível gravar o rascunho. Tente de novo.')
+      .then((resposta) => {
+        setRascunho(null);
+        setAvisoDaIa(`Rascunho gravado: ${resposta.itens_gravados} ${resposta.itens_gravados === 1 ? 'item' : 'itens'} em ${resposta.cestas_atualizadas} ${resposta.cestas_atualizadas === 1 ? 'cesta' : 'cestas'}.`);
+        carregarTodasCestas();
+      })
+      .catch((err) => setErroDaIa(err.message))
+      .finally(() => setConfirmando(false));
+  };
+
+  const descartarRascunho = () => { setRascunho(null); setErroDaIa(''); };
+
+  // Trocar de semana volta para a primeira página, como trocar o filtro de tamanho.
+  // O rascunho é de uma semana só, então a troca pergunta antes de perder o que foi ajustado.
+  const mudarSemana = (nova) => {
+    if (rascunho && !window.confirm('Trocar de semana descarta o rascunho. Continuar?')) return;
+    setRascunho(null);
+    setErroDaIa('');
+    setAvisoDaIa('');
+    setSemana(nova);
+    setPagina(1);
+  };
   // Escolher (ou tirar) a assinante também volta para a primeira página
   const mudarAssinante = (nova) => { setAssinante(nova); setPagina(1); };
 
@@ -627,6 +834,24 @@ function Separacao({ token, abrirFechamento, aoExpirar, versao }) {
         Página {pagina} · {cestas.length} {cestas.length === 1 ? 'cesta' : 'cestas'}
       </div>
     </div>
+
+    {!rascunho && (
+      <div className="ia-bar">
+        <div>
+          <strong>Pré-preencher com IA</strong>
+          <p>A IA sugere como dividir o estoque entre as cestas aprovadas desta semana. Você revisa antes de gravar.</p>
+        </div>
+        <button type="button" className="btn btn-primary" onClick={pedirSugestao} disabled={sugerindo}>
+          {sugerindo ? 'Gerando sugestão...' : 'Pré-preencher com IA'}
+        </button>
+      </div>
+    )}
+    {!rascunho && erroDaIa && <div className="dialog-error" role="alert">{erroDaIa}</div>}
+    {avisoDaIa && <p className="ia-success" role="status">{avisoDaIa}</p>}
+    {rascunho && (
+      <RascunhoDaIa rascunho={rascunho} setRascunho={setRascunho} aoConfirmar={confirmarRascunho}
+        aoDescartar={descartarRascunho} confirmando={confirmando} erro={erroDaIa} />
+    )}
 
     {erro && <div className="dialog-error">{erro}</div>}
 

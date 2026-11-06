@@ -32,6 +32,7 @@ Preencha o `.env`:
 | `ORIGEM_FRONTEND` | o endereço exato do front: `http://localhost:5173` |
 | `CHAVE_DO_TOKEN` | a chave que assina os tokens. Gere com `python -c "import secrets; print(secrets.token_hex(32))"` |
 | `URL_DO_BANCO_TESTE` | opcional: um banco vazio terminado em `_teste`, só para o `testar_backend.py` |
+| `CHAVE_DA_IA` | opcional: a chave da API do Gemini, criada no Google AI Studio. Sem ela, só o pré-preenchimento fica indisponível |
 
 Depois, monte o banco (próxima seção) e suba a API:
 
@@ -106,6 +107,8 @@ Sem ele, ou com o token inválido ou vencido (60 minutos), a resposta é **401**
 | PATCH | `/cestas/{cesta_id}/aprovar` | aprova o pedido: a cesta pedida passa para `em_separacao` | grupo com `cestas:aprovar`: produtor | 200 | 401 · 403 sem permissão · 404 cesta não existe · 409 a cesta não está pedida |
 | PATCH | `/cestas/{cesta_id}/reprovar` | reprova o pedido: a cesta pedida passa para `recusada` | grupo com `cestas:aprovar`: produtor | 200 | 401 · 403 sem permissão · 404 cesta não existe · 409 a cesta não está pedida |
 | PATCH | `/cestas/{cesta_id}/concluir` | conclui a cesta em separação, quando está cheia | grupo com `cestas:concluir`: produtor | 200 | 401 · 403 sem permissão · 404 cesta não existe · 409 não está em separação, ou não está cheia |
+| POST | `/cestas/pre-preenchimento` | pede à IA um rascunho das cestas da semana. Não grava nada | grupo com `cestas:pre_preencher`: produtor | 200 | 401 · 403 sem permissão · 409 sem cesta aprovada com espaço ou sem estoque · 422 dados inválidos · 503 a IA não respondeu |
+| POST | `/cestas/pre-preenchimento/confirmar` | confere de novo e grava o rascunho revisado, tudo ou nada | grupo com `produtos:separar`: produtor | 201 | 401 · 403 sem permissão · 409 algum item conflita, e nada foi gravado · 422 dados inválidos |
 | POST | `/estoques` | cadastra um produto colhido na semana. Se ele já está na semana, soma a quantidade | grupo com `estoque:cadastrar`: produtor | 201 | 401 · 403 sem permissão · 422 dados inválidos |
 | GET | `/estoques?semana=` | mostra o estoque da semana: colhido, separado e disponível de cada produto, e os tamanhos liberados | grupos com `estoque:ver`: assinante e produtor | 200 | 401 · 403 sem permissão · 422 semana ausente ou inválida |
 
@@ -137,6 +140,14 @@ o usuário foi identificado, mas o grupo dele não tem a permissão, ou a cesta 
   sobrou dele depois das outras cestas. Se passar, a resposta é **409**.
 - A assinante vê os produtos colhidos na semana ao pedir, só para consulta: quem escolhe os produtos é o produtor.
 
+### O pré-preenchimento com IA
+
+- Em **A separação**, o botão **Pré-preencher com IA** pede ao Gemini uma sugestão para as cestas aprovadas da semana.
+- A sugestão volta como um **rascunho**: nada é gravado até o produtor revisar e clicar em **Confirmar**.
+- O serviço confere cada item contra o limite da cesta e o estoque, na sugestão e de novo na confirmação.
+- O nome e o e-mail da assinante nunca vão para o modelo.
+- Se a IA falhar, a tela avisa, e a separação manual continua funcionando.
+
 ## Estrutura
 
 ```
@@ -153,7 +164,7 @@ backend/
 ├── esquemas/            os esquemas Pydantic de entrada e de saída
 └── modelos/             os modelos SQLAlchemy das quatro tabelas
 frontend/                o React: login, telas da assinante e do produtor (separação e estoque)
-docs/                    cartilha, briefing, DER, styleguide e marca
+docs/                    briefing, DER, styleguide e marca
 .docs/                   o diário do projeto: arquitetura, decisões e próximos passos
 ```
 

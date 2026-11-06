@@ -1,7 +1,5 @@
 # Briefing inicial — Cesta do Vale
 
-> Rascunho para revisão do aluno. Os requisitos abaixo vêm de `CARTILHA.md`; as decisões pessoais registradas foram informadas pelo aluno.
-
 ## Identificação do projeto
 
 - **Cartilha e nome da solução:** 3 — Cesta do Vale, horta comunitária.
@@ -32,6 +30,7 @@ As experiências da assinante e do produtor têm a mesma prioridade: ambas preci
 4. Listar os produtos separados de uma cesta.
 5. Separar um produto com sua quantidade, respeitando a capacidade da cesta.
 6. Cadastrar a colheita da semana, em unidades, que limita os tamanhos que podem ser pedidos e os produtos que podem ser separados. Pedido do autor, fora da cartilha. ?
+7. Pedir à IA um rascunho das cestas da semana, revisar e confirmar antes de gravar.
 
 ## Quatro telas previstas
 
@@ -60,11 +59,7 @@ As quatro telas devem funcionar tanto no celular quanto no computador.
 
 Na área do produtor, a capacidade de cada cesta será mostrada por uma **barra de progresso acompanhada de texto** com os números exatos. Exemplo para uma cesta pequena com quatro itens separados: **4 de 5 itens separados · cabe mais 1**. A barra representa a quantidade separada em relação ao limite da cesta; o texto permite conferir o espaço restante sem depender apenas da cor ou do preenchimento.
 
-## Limites desta etapa
-
-Não fazem parte da solução inicial: pagamento, rota de entrega, estoque em quilos, troca de produto e avisos por mensagem. Os dados ficam no MySQL (ciclo 2). ?
-
-## Evolução prevista pela cartilha
+## Evolução prevista
 
 - **Ciclo 2:** dados passam da memória para MySQL.
 - **Ciclo 4:** usuários recebem senha e o backend passa a conferir quem consulta as cestas.
@@ -77,6 +72,4 @@ Não fazem parte da solução inicial: pagamento, rota de entrega, estoque em qu
 - **Nome da solução:** manter Cesta do Vale.
 - **Identidade visual:** definir posteriormente.
 - **Apresentação da capacidade restante:** barra de progresso acompanhada do total separado, do limite e da quantidade que ainda cabe.
-- **Escolhas de caminhos, métodos e respostas da API:** [definir ao implementar o backend e justificar segundo o REST visto em aula].
-
-**Fonte:** `docs/CARTILHA.md`, preservada sem alterações.
+- **Escolhas de caminhos, métodos e respostas da API:** definidas no backend, e listadas no `README.md`.
