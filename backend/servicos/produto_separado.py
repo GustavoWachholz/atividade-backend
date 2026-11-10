@@ -27,12 +27,11 @@ def separar(sessao, cesta, dados):
     if dados.quantidade > restante:
         raise LimiteDaCestaExcedido(
             f"A quantidade passa do limite da cesta. Cabem só mais {restante} itens.")
-    estoque, disponivel = disponivel_do_produto(sessao, cesta.semana, dados.nome_produto)
+    estoque, disponivel = disponivel_do_produto(sessao, cesta.semana, dados.produto_id)
     if estoque is None:
         raise EstoqueInsuficiente("Esse produto não foi colhido na semana desta cesta.")
     if dados.quantidade > disponivel:
         raise EstoqueInsuficiente(
             f"Não há {estoque.nome_produto} suficiente no estoque. Restam só {disponivel} unidades.")
-    # O nome gravado é o do estoque, escrito igual ao cadastro, para as somas por produto baterem.
-    return repositorio_produto.salvar(sessao, cesta.id,
-                                      {**dados.model_dump(), "nome_produto": estoque.nome_produto})
+    # Grava só o id do catálogo: o nome é lido de lá, igual em todas as semanas.
+    return repositorio_produto.salvar(sessao, cesta.id, dados.model_dump())

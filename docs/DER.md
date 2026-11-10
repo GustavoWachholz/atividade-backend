@@ -1,6 +1,6 @@
 # DER — Cesta do Vale
 
-O desenho documenta as três tabelas da cartilha e a tabela `estoques`, pedida depois pelo autor. O `email` (único) e o `senha_hash` entraram por
+O desenho documenta as três tabelas da cartilha e as tabelas `estoques` e `produtos`, pedidas depois pelo autor. O `email` (único) e o `senha_hash` entraram por
 migration e aceitam `NULL` no banco só por causa dos cadastros feitos antes do login. Todo cadastro
 novo exige os dois: o esquema Pydantic recusa a falta deles, e a senha é guardada só como hash Argon2.
 A `semana` da cesta é a segunda-feira da semana do pedido, e a do estoque é a segunda-feira da semana da colheita.
@@ -9,6 +9,8 @@ A `semana` da cesta é a segunda-feira da semana do pedido, e a do estoque é a 
 erDiagram
     usuarios ||--o{ cestas : possui
     cestas ||--o{ produtos_separados : recebe
+    produtos ||--o{ estoques : colhido_em
+    produtos ||--o{ produtos_separados : separado_como
     usuarios {
         INT id PK
         VARCHAR_100 nome
@@ -28,15 +30,21 @@ erDiagram
     produtos_separados {
         INT id PK
         INT cesta_id FK
-        VARCHAR_100 nome_produto
+        INT produto_id FK
         INT quantidade
         DATETIME criado_em
     }
     estoques {
         INT id PK
         DATE semana UK
-        VARCHAR_100 nome_produto UK
+        INT produto_id FK, UK
         INT quantidade
+        DATETIME criado_em
+    }
+    produtos {
+        INT id PK
+        VARCHAR_100 nome UK
+        BOOLEAN ativo
         DATETIME criado_em
     }
 ```
@@ -44,10 +52,13 @@ erDiagram
 `VARCHAR_100` representa `VARCHAR(100)`. Todas as tabelas usam InnoDB.
 Um usuário pode ter nenhuma ou várias cestas; cada cesta tem um usuário.
 Uma cesta pode ter nenhum ou vários produtos separados; cada produto tem uma cesta.
-O `estoques` não tem chave estrangeira: o produto separado se liga a ele pelo `nome_produto` e pela `semana`
-da cesta, conferidos no serviço. O par `semana` + `nome_produto` é único.
-A comparação do nome usa a collation padrão do banco (`utf8mb4_0900_ai_ci`): ela ignora maiúsculas e também
-acentos, então "Maca" e "Maçã" contam como o mesmo produto na mesma semana.
+O `produtos` é o catálogo da horta: cada produto é cadastrado uma vez e vale para todas as semanas.
+O `estoques` e o `produtos_separados` apontam para ele pela `produto_id` (chave estrangeira); o nome não é guardado
+de novo nessas tabelas. O produto separado se liga ao estoque pela `produto_id` e pela `semana` da cesta, conferidas
+no serviço. O par `semana` + `produto_id` é único.
+O nome do produto é único sem contar maiúsculas: o índice `uq_produtos_nome` é feito sobre `lower(nome)`, então
+"Alface" e "alface" não convivem. Acentos contam: "Maca" e "Maçã" são produtos diferentes.
+Um produto desativado (`ativo` falso) continua na tabela, para o histórico das cestas, mas não entra numa colheita nova.
 
 | Tabela | Coluna | Tipo MySQL | Restrição no banco |
 | --- | --- | --- | --- |
@@ -65,14 +76,18 @@ acentos, então "Maca" e "Maçã" contam como o mesmo produto na mesma semana.
 | cestas | criado_em | DATETIME | NOT NULL, DEFAULT CURRENT_TIMESTAMP |
 | produtos_separados | id | INT | PK, AUTO_INCREMENT, NOT NULL |
 | produtos_separados | cesta_id | INT | FK → cestas.id, NOT NULL |
-| produtos_separados | nome_produto | VARCHAR(100) | NOT NULL |
+| produtos_separados | produto_id | INT | FK → produtos.id, NOT NULL |
 | produtos_separados | quantidade | INT | NOT NULL |
 | produtos_separados | criado_em | DATETIME | NOT NULL, DEFAULT CURRENT_TIMESTAMP |
 | estoques | id | INT | PK, AUTO_INCREMENT, NOT NULL |
-| estoques | semana | DATE | NOT NULL; UNIQUE com nome_produto (uq_estoques_semana_produto) |
-| estoques | nome_produto | VARCHAR(100) | NOT NULL; UNIQUE com semana |
+| estoques | semana | DATE | NOT NULL; UNIQUE com produto_id (uq_estoques_semana_produto) |
+| estoques | produto_id | INT | FK → produtos.id, NOT NULL; UNIQUE com semana |
 | estoques | quantidade | INT | NOT NULL |
 | estoques | criado_em | DATETIME | NOT NULL, DEFAULT CURRENT_TIMESTAMP |
+| produtos | id | INT | PK, AUTO_INCREMENT, NOT NULL |
+| produtos | nome | VARCHAR(100) | NOT NULL; índice único em lower(nome) (uq_produtos_nome) |
+| produtos | ativo | BOOLEAN | NOT NULL, DEFAULT true |
+| produtos | criado_em | DATETIME | NOT NULL, DEFAULT CURRENT_TIMESTAMP |
 
 O esquema Pydantic recusa nomes vazios e quantidades que não sejam inteiros positivos.
 O serviço verifica se o usuário é assinante, aplica os limites 5, 8 e 12 e muda a
@@ -82,7 +97,9 @@ o disponível e o reservado do estoque são calculados a partir das cestas e dos
 
 `ForeignKey` cria a restrição no MySQL; `Cesta.produtos_separados = relationship("ProdutoSeparado")`
 permite ler os produtos no Python, sem criar outra coluna. Do mesmo jeito,
-`Cesta.assinante = relationship("Usuario")` lê o dono da cesta pela `assinante_id`.
+`Cesta.assinante = relationship("Usuario")` lê o dono da cesta pela `assinante_id`, e
+`Estoque.produto` e `ProdutoSeparado.produto` leem o produto do catálogo pela `produto_id`. A propriedade
+`nome_produto` desses dois modelos devolve `produto.nome`, para as respostas da API continuarem trazendo o nome.
 
 Confira no MySQL depois de executar `python criar_tabelas.py`:
 
@@ -91,6 +108,7 @@ DESCRIBE usuarios;
 DESCRIBE cestas;
 DESCRIBE produtos_separados;
 DESCRIBE estoques;
+DESCRIBE produtos;
 SHOW CREATE TABLE produtos_separados;
 ```
 

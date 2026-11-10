@@ -37,6 +37,7 @@ from repositorios import produto_separado as repositorio_produto
 from servicos import cesta as servico_cesta
 from servicos import produto_separado as servico_produto
 from servicos import estoque as servico_estoque
+from servicos import produto as servico_catalogo
 from servicos import pre_preenchimento as servico_ia
 from servicos.excecoes import ConfirmacaoRecusada, IaIndisponivel, NadaParaPreencher
 from esquemas.pre_preenchimento import ConfirmacaoDoRascunho
@@ -87,11 +88,22 @@ class TestesBackend(unittest.TestCase):
         for semana in ["2026-10-05", "2026-10-12"]:
             self.cadastrar_estoque(semana, "Alface", 500)
 
+    # O id do produto no catálogo. Na primeira vez, o produtor cadastra o produto pelo POST /produtos.
+    def produto_id(self, nome):
+        self.produtos = getattr(self, "produtos", {})
+        if nome not in self.produtos:
+            app.dependency_overrides[obter_usuario_atual] = lambda: self.usuario_atual
+            resposta = self.cliente.post("/produtos", json={"nome": nome})
+            self.assertEqual(resposta.status_code, 201)
+            self.produtos[nome] = resposta.json()["id"]
+        return self.produtos[nome]
+
     # O produtor (usuário padrão) cadastra a colheita de uma semana.
     def cadastrar_estoque(self, semana, nome_produto, quantidade):
+        produto_id = self.produto_id(nome_produto)
         app.dependency_overrides[obter_usuario_atual] = lambda: self.usuario_atual
         resposta = self.cliente.post("/estoques", json={
-            "semana": semana, "nome_produto": nome_produto, "quantidade": quantidade})
+            "semana": semana, "produto_id": produto_id, "quantidade": quantidade})
         self.assertEqual(resposta.status_code, 201)
         return resposta.json()
 
@@ -141,7 +153,7 @@ class TestesBackend(unittest.TestCase):
     def separar(self, cesta_id, quantidade):
         app.dependency_overrides[obter_usuario_atual] = lambda: self.usuario_atual
         return self.cliente.post(f"/cestas/{cesta_id}/produtos", json={
-            "nome_produto": "Alface", "quantidade": quantidade
+            "produto_id": self.produto_id("Alface"), "quantidade": quantidade
         })
 
     # Tipos inválidos não podem criar usuários nem aparecer na persistência.
@@ -305,6 +317,34 @@ class TestesBackend(unittest.TestCase):
         vazia = self.cliente.get("/estoques?semana=2026-10-26").json()
         self.assertEqual((vazia["itens"], vazia["tamanhos_liberados"]), ([], []))
 
+    # O catálogo não repete nome (sem contar maiúsculas), renomeia em todas as semanas,
+    # e o produto desativado sai das listas de escolha e não entra numa colheita nova.
+    def test_catalogo_de_produtos(self):
+        alface = self.produto_id("Alface")  # já cadastrada no setUp
+        repetido = self.cliente.post("/produtos", json={"nome": "  ALFACE "})
+        self.assertEqual(repetido.status_code, 409)
+        self.assertEqual(repetido.json()["detail"], "Já existe um produto chamado Alface.")
+        couve = self.produto_id("Couve")
+        self.assertEqual(self.cliente.patch(f"/produtos/{couve}", json={"nome": "alface"}).status_code, 409)
+        self.assertEqual(self.cliente.patch(f"/produtos/{couve}", json={}).status_code, 422)
+        self.assertEqual(self.cliente.patch("/produtos/999", json={"ativo": False}).status_code, 404)
+        # Renomear muda o nome também no estoque das semanas que já passaram.
+        self.assertEqual(self.cliente.patch(f"/produtos/{alface}", json={"nome": "Alface crespa"}).json()["nome"],
+                         "Alface crespa")
+        self.assertEqual(self.cliente.get("/estoques?semana=2026-10-05").json()["itens"][0]["nome_produto"],
+                         "Alface crespa")
+
+        self.assertFalse(self.cliente.patch(f"/produtos/{couve}", json={"ativo": False}).json()["ativo"])
+        self.assertEqual([p["nome"] for p in self.cliente.get("/produtos").json()], ["Alface crespa", "Couve"])
+        self.assertEqual([p["nome"] for p in self.cliente.get("/produtos?ativos=true").json()], ["Alface crespa"])
+        desativado = self.cliente.post("/estoques", json={"semana": "2026-10-19", "produto_id": couve, "quantidade": 2})
+        self.assertEqual(desativado.status_code, 409)
+        self.assertEqual(desativado.json()["detail"], "Couve está desativado no catálogo.")
+        inexistente = self.cliente.post("/estoques", json={"semana": "2026-10-19", "produto_id": 999, "quantidade": 2})
+        self.assertEqual(inexistente.status_code, 409)
+        self.assertTrue(self.cliente.patch(f"/produtos/{couve}", json={"ativo": True}).json()["ativo"])
+        self.cadastrar_estoque("2026-10-19", "Couve", 2)
+
     # O pedido não depende do estoque: sem colheita lançada ele entra como pedida.
     # A reserva só conta as cestas aprovadas (em separação).
     def test_pedido_sem_estoque_e_reserva_na_aprovacao(self):
@@ -364,7 +404,7 @@ class TestesBackend(unittest.TestCase):
 
         def produto(cesta, nome, quantidade):
             return self.cliente.post(f"/cestas/{cesta}/produtos",
-                                     json={"nome_produto": nome, "quantidade": quantidade})
+                                     json={"produto_id": self.produto_id(nome), "quantidade": quantidade})
 
         recusa = produto(primeira, "Abóbora", 1)
         self.assertEqual(recusa.status_code, 409)
@@ -391,7 +431,7 @@ class TestesBackend(unittest.TestCase):
         outra = self.criar_cesta(assinante)  # semana 2026-10-05
         self.decidir(quinta.json()["id"], "aprovar")
         resposta = self.cliente.post(f"/cestas/{quinta.json()['id']}/produtos",
-                                     json={"nome_produto": "Tomate", "quantidade": 3})
+                                     json={"produto_id": self.produto_id("Tomate"), "quantidade": 3})
         self.assertEqual(resposta.status_code, 201)
         resumo = self.cliente.get("/estoques?semana=2026-10-25").json()  # um domingo da mesma semana
         self.assertEqual((resumo["semana"], resumo["total_reservado"]), ("2026-10-19", 5))
@@ -428,8 +468,8 @@ class TestesBackend(unittest.TestCase):
         assinante = self.criar_usuario()
         cesta = self.criar_cesta(assinante)
         self.cadastrar_estoque("2026-10-05", "Couve", 10)
-        itens = [{"cesta_id": cesta, "produto": "Alface", "quantidade": 3},
-                 {"cesta_id": cesta, "produto": "Couve", "quantidade": 2}]
+        itens = [{"cesta_id": cesta, "produto_id": self.produto_id("Alface"), "quantidade": 3},
+                 {"cesta_id": cesta, "produto_id": self.produto_id("Couve"), "quantidade": 2}]
         with patch.object(servico_ia, "chamar_modelo", return_value=itens):
             rascunho = self.cliente.post("/cestas/pre-preenchimento", json={"semana": "2026-10-07"})
         self.assertEqual(rascunho.status_code, 200)
@@ -454,8 +494,8 @@ class TestesBackend(unittest.TestCase):
         self.cadastrar_estoque("2026-10-05", "Couve", 2)
         resposta = self.cliente.post("/cestas/pre-preenchimento/confirmar", json={
             "semana": "2026-10-05",
-            "itens": [{"cesta_id": cesta, "produto": "Alface", "quantidade": 1},
-                      {"cesta_id": cesta, "produto": "Couve", "quantidade": 3}]})
+            "itens": [{"cesta_id": cesta, "produto_id": self.produto_id("Alface"), "quantidade": 1},
+                      {"cesta_id": cesta, "produto_id": self.produto_id("Couve"), "quantidade": 3}]})
         self.assertEqual(resposta.status_code, 409)
         self.assertIn("Nada foi gravado", resposta.json()["detail"])
         self.assertEqual(self.cliente.get(f"/cestas/{cesta}/produtos").json(), [])
@@ -644,7 +684,7 @@ class TestesSemConexao(unittest.TestCase):
     # A regra recusa com exceção, antes de gravar, e não muda a situação.
     def test_regra_do_limite_levanta_excecao(self):
         cesta = Cesta(id=10, tamanho="pequena", situacao="em_separacao", semana=date(2026, 10, 5))
-        cesta.produtos_separados = [ProdutoSeparado(nome_produto="Alface", quantidade=4)]
+        cesta.produtos_separados = [ProdutoSeparado(produto_id=1, quantidade=4)]
         dados = Mock(quantidade=2)
         with patch.object(repositorio_produto, "salvar") as salvar:
             with self.assertRaises(LimiteDaCestaExcedido):
@@ -678,7 +718,7 @@ class TestesSemConexao(unittest.TestCase):
             self.assertEqual(cliente.get("/cestas").status_code, 401)
             self.assertEqual(cliente.get("/usuarios/eu").status_code, 401)
             self.assertEqual(cliente.post("/cestas", json={"semana": "2026-10-05", "tamanho": "pequena"}).status_code, 401)
-            self.assertEqual(cliente.post("/cestas/1/produtos", json={"nome_produto": "Alface", "quantidade": 1}).status_code, 401)
+            self.assertEqual(cliente.post("/cestas/1/produtos", json={"produto_id": 1, "quantidade": 1}).status_code, 401)
 
     def test_login_sucesso_retorna_jwt_e_falha_retorna_401(self):
         usuario = Usuario(id=1, nome="Vanderlei", tipo="produtor", email="vanderlei@example.com")
@@ -699,7 +739,7 @@ class TestesSemConexao(unittest.TestCase):
         assinante = Usuario(id=2, nome="Aline", tipo="assinante", email="aline@example.com")
         app.dependency_overrides[obter_usuario_atual] = lambda: assinante
         with TestClient(app) as cliente:
-            res = cliente.post("/cestas/1/produtos", json={"nome_produto": "Alface", "quantidade": 1})
+            res = cliente.post("/cestas/1/produtos", json={"produto_id": 1, "quantidade": 1})
             self.assertEqual(res.status_code, 403)
             self.assertEqual(res.json()["detail"], "Seu grupo não pode separar produtos")
 
@@ -707,13 +747,14 @@ class TestesSemConexao(unittest.TestCase):
     def test_permissoes_de_cada_grupo(self):
         assinante = Usuario(tipo="assinante")
         produtor = Usuario(tipo="produtor")
-        for permissao in ["conta:ver", "cestas:pedir", "cestas:ver", "estoque:ver"]:
+        for permissao in ["conta:ver", "cestas:pedir", "cestas:ver", "estoque:ver", "catalogo:ver"]:
             self.assertTrue(tem_permissao(assinante, permissao), permissao)
         for permissao in ["cestas:ver_todas", "cestas:aprovar", "cestas:concluir",
-                          "produtos:separar", "estoque:cadastrar"]:
+                          "produtos:separar", "estoque:cadastrar", "catalogo:editar"]:
             self.assertFalse(tem_permissao(assinante, permissao), permissao)
         for permissao in ["conta:ver", "cestas:ver", "cestas:ver_todas", "cestas:aprovar",
-                          "cestas:concluir", "produtos:separar", "estoque:cadastrar", "estoque:ver"]:
+                          "cestas:concluir", "produtos:separar", "estoque:cadastrar", "estoque:ver",
+                          "catalogo:ver", "catalogo:editar"]:
             self.assertTrue(tem_permissao(produtor, permissao), permissao)
         self.assertFalse(tem_permissao(produtor, "cestas:pedir"))
 
@@ -741,7 +782,7 @@ class TestesSemConexao(unittest.TestCase):
         app.dependency_overrides[obter_usuario_atual] = lambda: assinante
         with TestClient(app) as cliente:
             with patch.object(servico_estoque, "cadastrar") as cadastrar:
-                res = cliente.post("/estoques", json={"semana": "2026-10-19", "nome_produto": "Alface", "quantidade": 3})
+                res = cliente.post("/estoques", json={"semana": "2026-10-19", "produto_id": 1, "quantidade": 3})
                 self.assertEqual(res.status_code, 403)
                 self.assertEqual(res.json()["detail"], "Seu grupo não pode cadastrar o estoque")
                 cadastrar.assert_not_called()
@@ -750,14 +791,41 @@ class TestesSemConexao(unittest.TestCase):
                     "itens_livres": 0, "tamanhos_liberados": []}):
                 self.assertEqual(cliente.get("/estoques?semana=2026-10-19").status_code, 200)
 
+    # [NOVO · grupos] A assinante vê o catálogo, mas não cadastra nem edita produto.
+    def test_assinante_ve_mas_nao_edita_o_catalogo(self):
+        assinante = Usuario(id=2, nome="Aline", tipo="assinante", email="aline@example.com")
+        app.dependency_overrides[obter_usuario_atual] = lambda: assinante
+        with TestClient(app) as cliente:
+            with patch.object(servico_catalogo, "cadastrar") as cadastrar, \
+                    patch.object(servico_catalogo, "editar") as editar:
+                res = cliente.post("/produtos", json={"nome": "Alface"})
+                self.assertEqual(res.status_code, 403)
+                self.assertEqual(res.json()["detail"], "Seu grupo não pode editar o catálogo")
+                self.assertEqual(cliente.patch("/produtos/1", json={"ativo": False}).status_code, 403)
+                cadastrar.assert_not_called()
+                editar.assert_not_called()
+            with patch.object(servico_catalogo, "listar", return_value=[]) as listar:
+                self.assertEqual(cliente.get("/produtos?ativos=true").status_code, 200)
+                self.assertEqual(listar.call_args.args[1:], (True,))
+
+    # O nome do produto tira os espaços das pontas e não pode ficar vazio nem passar de 100 letras.
+    def test_catalogo_entradas_invalidas(self):
+        with TestClient(app) as cliente:
+            with patch.object(servico_catalogo, "cadastrar") as cadastrar:
+                for corpo in [{"nome": "   "}, {"nome": "x" * 101}, {}, {"nome": "Alface", "ativo": False}]:
+                    self.assertEqual(cliente.post("/produtos", json=corpo).status_code, 422, corpo)
+                cadastrar.assert_not_called()
+
     # Sem a semana, ou com quantidade que não é inteiro positivo, o estoque recusa com 422.
     def test_estoque_entradas_invalidas(self):
         with TestClient(app) as cliente:
             self.assertEqual(cliente.get("/estoques").status_code, 422)
             with patch.object(servico_estoque, "cadastrar") as cadastrar:
-                base = {"semana": "2026-10-19", "nome_produto": "Alface", "quantidade": 3}
+                base = {"semana": "2026-10-19", "produto_id": 1, "quantidade": 3}
+                # O nome digitado não é mais aceito: o produto vem do catálogo pelo id.
                 for mudanca in [{"quantidade": 0}, {"quantidade": 1.5}, {"quantidade": "2"},
-                                {"nome_produto": "  "}, {"semana": "ontem"}, {"extra": 1}]:
+                                {"produto_id": 0}, {"produto_id": "1"}, {"nome_produto": "Alface"},
+                                {"semana": "ontem"}, {"extra": 1}]:
                     self.assertEqual(cliente.post("/estoques", json={**base, **mudanca}).status_code, 422)
                 cadastrar.assert_not_called()
 
@@ -767,12 +835,12 @@ class TestesSemConexao(unittest.TestCase):
         pedida.produtos_separados = []
         with patch.object(repositorio_produto, "salvar") as salvar:
             with self.assertRaises(CestaNaoEmSeparacao):
-                servico_produto.separar(Mock(), pedida, Mock(nome_produto="Alface", quantidade=1))
+                servico_produto.separar(Mock(), pedida, Mock(produto_id=1, quantidade=1))
             with self.assertRaises(CestaNaoEmSeparacao):
                 servico_cesta.concluir(Mock(), pedida)
             salvar.assert_not_called()
         em_separacao = Cesta(id=11, tamanho="pequena", situacao="em_separacao", semana=date(2026, 10, 19))
-        em_separacao.produtos_separados = [ProdutoSeparado(nome_produto="Alface", quantidade=4)]
+        em_separacao.produtos_separados = [ProdutoSeparado(produto_id=1, quantidade=4)]
         with patch.object(repositorio_cesta, "atualizar") as atualizar:
             with self.assertRaises(CestaIncompleta):
                 servico_cesta.concluir(Mock(), em_separacao)
@@ -787,7 +855,7 @@ class TestesSemConexao(unittest.TestCase):
         with patch.object(servico_produto, "disponivel_do_produto", return_value=(Mock(nome_produto="Alface"), 2)):
             with patch.object(repositorio_produto, "salvar") as salvar:
                 with self.assertRaises(EstoqueInsuficiente):
-                    servico_produto.separar(Mock(), cesta, Mock(nome_produto="Alface", quantidade=3))
+                    servico_produto.separar(Mock(), cesta, Mock(produto_id=1, quantidade=3))
                 salvar.assert_not_called()
 
     # O pedido só vale para a semana atual: passada ou futura levanta exceção, e a atual passa.
@@ -826,7 +894,8 @@ class TestesPrePreenchimento(unittest.TestCase):
         self.estado = {
             "cestas": [{"cesta_id": 1, "tamanho": "pequena", "assinante": "Pessoa Inventada",
                         "espaco_livre": 5, "ja_separados": []}],
-            "disponivel": {"Alface": 10, "Couve": 3},
+            "disponivel": {1: 10, 2: 3},
+            "nomes": {1: "Alface", 2: "Couve"},
             "cestas_pedidas": 0,
         }
         patcher = patch.object(servico_ia, "estado_da_semana", side_effect=lambda *_: self.estado)
@@ -835,44 +904,44 @@ class TestesPrePreenchimento(unittest.TestCase):
 
     # Cada item sozinho cabe, mas os dois juntos estouram a cesta e o estoque.
     def test_conferir_soma_os_itens_entre_si(self):
-        itens = [{"cesta_id": 1, "produto": "Alface", "quantidade": 4},
-                 {"cesta_id": 1, "produto": "Alface", "quantidade": 2}]
-        validos, recusados, espaco, disponivel = servico_ia.conferir_itens(itens, {1: 5}, {"Alface": 10})
+        itens = [{"cesta_id": 1, "produto_id": 1, "quantidade": 4},
+                 {"cesta_id": 1, "produto_id": 1, "quantidade": 2}]
+        validos, recusados, espaco, disponivel = servico_ia.conferir_itens(itens, {1: 5}, {1: 10})
         self.assertEqual(validos, itens[:1])
         self.assertIn("Cabem só mais 1", recusados[0]["motivo"])
-        self.assertEqual((espaco[1], disponivel["Alface"]), (1, 6))
+        self.assertEqual((espaco[1], disponivel[1]), (1, 6))
 
         _, recusados, _, _ = servico_ia.conferir_itens(
-            [{"cesta_id": 1, "produto": "Couve", "quantidade": 3},
-             {"cesta_id": 2, "produto": "Couve", "quantidade": 1}], {1: 5, 2: 5}, {"Couve": 3})
+            [{"cesta_id": 1, "produto_id": 2, "quantidade": 3},
+             {"cesta_id": 2, "produto_id": 2, "quantidade": 1}], {1: 5, 2: 5}, {2: 3})
         self.assertIn("Restam só 0", recusados[0]["motivo"])
 
     # Cesta de fora, produto inventado e quantidade zero ou negativa nunca passam.
     def test_conferir_recusa_o_que_o_modelo_inventa(self):
-        itens = [{"cesta_id": 9, "produto": "Alface", "quantidade": 1},
-                 {"cesta_id": 1, "produto": "Abacaxi", "quantidade": 1},
-                 {"cesta_id": 1, "produto": "Alface", "quantidade": 0},
-                 {"cesta_id": 1, "produto": "Alface", "quantidade": -2}]
-        validos, recusados, _, _ = servico_ia.conferir_itens(itens, {1: 5}, {"Alface": 10})
+        itens = [{"cesta_id": 9, "produto_id": 1, "quantidade": 1},
+                 {"cesta_id": 1, "produto_id": 3, "quantidade": 1},
+                 {"cesta_id": 1, "produto_id": 1, "quantidade": 0},
+                 {"cesta_id": 1, "produto_id": 1, "quantidade": -2}]
+        validos, recusados, _, _ = servico_ia.conferir_itens(itens, {1: 5}, {1: 10})
         self.assertEqual(validos, [])
         self.assertEqual(len(recusados), 4)
 
     # O conferir não pode mexer nos dicionários que recebeu.
     def test_conferir_nao_altera_a_entrada(self):
-        espaco, disponivel = {1: 5}, {"Alface": 10}
-        servico_ia.conferir_itens([{"cesta_id": 1, "produto": "Alface", "quantidade": 2}], espaco, disponivel)
-        self.assertEqual((espaco, disponivel), ({1: 5}, {"Alface": 10}))
+        espaco, disponivel = {1: 5}, {1: 10}
+        servico_ia.conferir_itens([{"cesta_id": 1, "produto_id": 1, "quantidade": 2}], espaco, disponivel)
+        self.assertEqual((espaco, disponivel), ({1: 5}, {1: 10}))
 
     # Resposta certa: uma chamada só, e o nome da assinante não sai do sistema.
     def test_resposta_certa_faz_uma_chamada_e_protege_a_assinante(self):
-        itens = [{"cesta_id": 1, "produto": "Alface", "quantidade": 5}]
+        itens = [{"cesta_id": 1, "produto_id": 1, "quantidade": 5}]
         with patch.object(servico_ia, "chamar_modelo", return_value=itens) as chamar:
             rascunho = servico_ia.sugerir(Mock(), date(2026, 10, 7))
         self.assertEqual(chamar.call_count, 1)
         self.assertNotIn("Pessoa Inventada", chamar.call_args.args[0])
         self.assertNotIn("assinante", chamar.call_args.args[0].split("Dados da semana:")[1])
         self.assertEqual(rascunho["semana"], date(2026, 10, 5))
-        self.assertEqual(rascunho["cestas"][0]["itens"], [{"produto": "Alface", "quantidade": 5}])
+        self.assertEqual(rascunho["cestas"][0]["itens"], [{"produto_id": 1, "produto": "Alface", "quantidade": 5}])
 
     # A leitura termina antes da chamada ao modelo, para não prender a conexão com o banco.
     def test_conexao_e_solta_antes_do_modelo(self):
@@ -885,39 +954,39 @@ class TestesPrePreenchimento(unittest.TestCase):
 
     # Item inválido gera uma correção, com o motivo e o que sobrou, e o substituto entra no rascunho.
     def test_correcao_substitui_o_item_invalido(self):
-        respostas = [[{"cesta_id": 1, "produto": "Alface", "quantidade": 3},
-                      {"cesta_id": 1, "produto": "Abacaxi", "quantidade": 2}],
-                     [{"cesta_id": 1, "produto": "Couve", "quantidade": 2}]]
+        respostas = [[{"cesta_id": 1, "produto_id": 1, "quantidade": 3},
+                      {"cesta_id": 1, "produto_id": 3, "quantidade": 2}],
+                     [{"cesta_id": 1, "produto_id": 2, "quantidade": 2}]]
         with patch.object(servico_ia, "chamar_modelo", side_effect=respostas) as chamar:
             rascunho = servico_ia.sugerir(Mock(), date(2026, 10, 5))
         self.assertEqual(chamar.call_count, 2)
         pedido = chamar.call_args.args[0]
-        self.assertIn("Abacaxi", pedido)
+        self.assertIn('"produto_id": 3', pedido)
         self.assertIn("não está no estoque", pedido)
         self.assertEqual(len(rascunho["cestas"][0]["itens"]), 2)
         self.assertEqual(rascunho["descartados"], [])
 
     # A correção é uma só: o que continuar inválido é descartado, e o espaço fica vazio.
     def test_correcao_acontece_uma_vez_e_descarta(self):
-        ruim = [{"cesta_id": 1, "produto": "Abacaxi", "quantidade": 2}]
+        ruim = [{"cesta_id": 1, "produto_id": 3, "quantidade": 2}]
         with patch.object(servico_ia, "chamar_modelo", return_value=ruim) as chamar:
             rascunho = servico_ia.sugerir(Mock(), date(2026, 10, 5))
         self.assertEqual(chamar.call_count, 2)
         self.assertEqual(rascunho["cestas"][0]["itens"], [])
-        self.assertEqual(rascunho["descartados"][0]["produto"], "Abacaxi")
+        self.assertEqual(rascunho["descartados"][0]["produto"], "Produto #3")
 
     # Sem substituto, o item recusado continua na lista: o produtor precisa saber por que há espaço vazio.
     def test_item_sem_substituto_aparece_nos_descartados(self):
-        respostas = [[{"cesta_id": 1, "produto": "Alface", "quantidade": 3},
-                      {"cesta_id": 1, "produto": "Abacaxi", "quantidade": 2}], []]
+        respostas = [[{"cesta_id": 1, "produto_id": 1, "quantidade": 3},
+                      {"cesta_id": 1, "produto_id": 3, "quantidade": 2}], []]
         with patch.object(servico_ia, "chamar_modelo", side_effect=respostas):
             rascunho = servico_ia.sugerir(Mock(), date(2026, 10, 5))
-        self.assertEqual([item["produto"] for item in rascunho["descartados"]], ["Abacaxi"])
+        self.assertEqual([item["produto_id"] for item in rascunho["descartados"]], [3])
 
     # Com a cesta já cheia, não há o que corrigir: não gasta a segunda chamada nem avisa o produtor.
     def test_sem_espaco_nao_faz_correcao(self):
-        respostas = [{"cesta_id": 1, "produto": "Alface", "quantidade": 5},
-                     {"cesta_id": 1, "produto": "Abacaxi", "quantidade": 1}]
+        respostas = [{"cesta_id": 1, "produto_id": 1, "quantidade": 5},
+                     {"cesta_id": 1, "produto_id": 3, "quantidade": 1}]
         with patch.object(servico_ia, "chamar_modelo", return_value=respostas) as chamar:
             rascunho = servico_ia.sugerir(Mock(), date(2026, 10, 5))
         self.assertEqual(chamar.call_count, 1)
@@ -925,17 +994,17 @@ class TestesPrePreenchimento(unittest.TestCase):
 
     # Se a primeira resposta demorou demais, não há tempo para a correção: o espaço fica vazio e é avisado.
     def test_sem_tempo_nao_faz_correcao(self):
-        primeira = [{"cesta_id": 1, "produto": "Alface", "quantidade": 3},
-                    {"cesta_id": 1, "produto": "Abacaxi", "quantidade": 2}]
+        primeira = [{"cesta_id": 1, "produto_id": 1, "quantidade": 3},
+                    {"cesta_id": 1, "produto_id": 3, "quantidade": 2}]
         with patch.object(servico_ia.time, "monotonic", side_effect=[0, 95]):
             with patch.object(servico_ia, "chamar_modelo", return_value=primeira) as chamar:
                 rascunho = servico_ia.sugerir(Mock(), date(2026, 10, 5))
         self.assertEqual(chamar.call_count, 1)
-        self.assertEqual(rascunho["descartados"][0]["produto"], "Abacaxi")
+        self.assertEqual(rascunho["descartados"][0]["produto"], "Produto #3")
 
     # A correção recebe só o tempo que ainda sobra do total.
     def test_correcao_usa_o_tempo_que_sobra(self):
-        primeira = [{"cesta_id": 1, "produto": "Abacaxi", "quantidade": 2}]
+        primeira = [{"cesta_id": 1, "produto_id": 3, "quantidade": 2}]
         with patch.object(servico_ia.time, "monotonic", side_effect=[0, 30]):
             with patch.object(servico_ia, "chamar_modelo", side_effect=[primeira, []]) as chamar:
                 servico_ia.sugerir(Mock(), date(2026, 10, 5))
@@ -943,28 +1012,28 @@ class TestesPrePreenchimento(unittest.TestCase):
 
     # Se só a correção falhar, o que já estava certo continua no rascunho.
     def test_falha_na_correcao_mantem_a_primeira_resposta(self):
-        primeira = [{"cesta_id": 1, "produto": "Alface", "quantidade": 3},
-                    {"cesta_id": 1, "produto": "Abacaxi", "quantidade": 2}]
+        primeira = [{"cesta_id": 1, "produto_id": 1, "quantidade": 3},
+                    {"cesta_id": 1, "produto_id": 3, "quantidade": 2}]
         with patch.object(servico_ia, "chamar_modelo", side_effect=[primeira, IaIndisponivel("x")]):
             rascunho = servico_ia.sugerir(Mock(), date(2026, 10, 5))
-        self.assertEqual(rascunho["cestas"][0]["itens"], [{"produto": "Alface", "quantidade": 3}])
-        self.assertEqual(rascunho["descartados"][0]["produto"], "Abacaxi")
+        self.assertEqual(rascunho["cestas"][0]["itens"], [{"produto_id": 1, "produto": "Alface", "quantidade": 3}])
+        self.assertEqual(rascunho["descartados"][0]["produto"], "Produto #3")
 
     # Duas linhas do mesmo produto na mesma cesta viram uma só no rascunho.
     def test_rascunho_junta_o_mesmo_produto(self):
-        itens = [{"cesta_id": 1, "produto": "Alface", "quantidade": 2},
-                 {"cesta_id": 1, "produto": "Alface", "quantidade": 1}]
+        itens = [{"cesta_id": 1, "produto_id": 1, "quantidade": 2},
+                 {"cesta_id": 1, "produto_id": 1, "quantidade": 1}]
         with patch.object(servico_ia, "chamar_modelo", return_value=itens):
             rascunho = servico_ia.sugerir(Mock(), date(2026, 10, 5))
-        self.assertEqual(rascunho["cestas"][0]["itens"], [{"produto": "Alface", "quantidade": 3}])
+        self.assertEqual(rascunho["cestas"][0]["itens"], [{"produto_id": 1, "produto": "Alface", "quantidade": 3}])
 
     # Sem estoque ou sem espaço, recusa antes de gastar uma chamada.
     def test_nada_para_preencher_nao_chama_o_modelo(self):
         with patch.object(servico_ia, "chamar_modelo") as chamar:
-            self.estado["disponivel"] = {"Alface": 0}
+            self.estado["disponivel"] = {1: 0}
             with self.assertRaises(NadaParaPreencher):
                 servico_ia.sugerir(Mock(), date(2026, 10, 5))
-            self.estado["disponivel"] = {"Alface": 5}
+            self.estado["disponivel"] = {1: 5}
             self.estado["cestas"][0]["espaco_livre"] = 0
             with self.assertRaises(NadaParaPreencher):
                 servico_ia.sugerir(Mock(), date(2026, 10, 5))
@@ -991,12 +1060,12 @@ class TestesPrePreenchimento(unittest.TestCase):
         cliente = Mock()
         cliente.interactions.create.side_effect = [
             Mock(output_text='nao e json'),
-            Mock(output_text='{"itens": [{"cesta_id": 1, "produto": "Alface", "quantidade": 2}]}')]
+            Mock(output_text='{"itens": [{"cesta_id": 1, "produto_id": 1, "quantidade": 2}]}')]
         with patch.object(servico_ia, "CHAVE_DA_IA", "chave-falsa"):
             with patch.object(servico_ia, "MODELOS_DA_IA", ["modelo-a", "modelo-b"]):
                 with patch.object(servico_ia.genai, "Client", return_value=cliente):
                     itens = servico_ia.chamar_modelo("pedido")
-        self.assertEqual(itens, [{"cesta_id": 1, "produto": "Alface", "quantidade": 2}])
+        self.assertEqual(itens, [{"cesta_id": 1, "produto_id": 1, "quantidade": 2}])
         usados = [chamada.kwargs["model"] for chamada in cliente.interactions.create.call_args_list]
         self.assertEqual(usados, ["modelo-a", "modelo-b"])
         self.assertTrue(all(c.kwargs["timeout"] <= servico_ia.TEMPO_POR_MODELO
@@ -1006,8 +1075,8 @@ class TestesPrePreenchimento(unittest.TestCase):
     def test_confirmacao_trava_e_grava_uma_vez(self):
         sessao = Mock()
         dados = ConfirmacaoDoRascunho(semana="2026-10-07", itens=[
-            {"cesta_id": 1, "produto": "Alface", "quantidade": 2},
-            {"cesta_id": 1, "produto": "Couve", "quantidade": 3}])
+            {"cesta_id": 1, "produto_id": 1, "quantidade": 2},
+            {"cesta_id": 1, "produto_id": 2, "quantidade": 3}])
         with patch.object(repositorio_estoque, "travar_semana") as travar:
             resposta = servico_ia.confirmar(sessao, dados)
         travar.assert_called_once_with(sessao, date(2026, 10, 5))
@@ -1019,8 +1088,8 @@ class TestesPrePreenchimento(unittest.TestCase):
     def test_confirmacao_recusada_nao_grava(self):
         sessao = Mock()
         dados = ConfirmacaoDoRascunho(semana="2026-10-05", itens=[
-            {"cesta_id": 1, "produto": "Alface", "quantidade": 2},
-            {"cesta_id": 1, "produto": "Couve", "quantidade": 4}])
+            {"cesta_id": 1, "produto_id": 1, "quantidade": 2},
+            {"cesta_id": 1, "produto_id": 2, "quantidade": 4}])
         with patch.object(repositorio_estoque, "travar_semana"):
             with self.assertRaises(ConfirmacaoRecusada):
                 servico_ia.confirmar(sessao, dados)
@@ -1041,7 +1110,7 @@ class TestesRotasDoPrePreenchimento(unittest.TestCase):
     # [NOVO · grupos] A assinante não pede a sugestão nem confirma: recebe 403 antes de qualquer conta.
     def test_assinante_recebe_403(self):
         self.usuario = Usuario(id=2, nome="Aline", tipo="assinante", email="aline@example.com")
-        corpo = {"semana": "2026-10-05", "itens": [{"cesta_id": 1, "produto": "Alface", "quantidade": 1}]}
+        corpo = {"semana": "2026-10-05", "itens": [{"cesta_id": 1, "produto_id": 1, "quantidade": 1}]}
         with patch.object(servico_ia, "sugerir") as sugerir, patch.object(servico_ia, "confirmar") as confirmar:
             self.assertEqual(self.cliente.post("/cestas/pre-preenchimento",
                                                json={"semana": "2026-10-05"}).status_code, 403)
@@ -1064,7 +1133,7 @@ class TestesRotasDoPrePreenchimento(unittest.TestCase):
         with patch.object(servico_ia, "sugerir", side_effect=NadaParaPreencher("Sem estoque")):
             self.assertEqual(self.cliente.post("/cestas/pre-preenchimento",
                                                json={"semana": "2026-10-05"}).status_code, 409)
-        corpo = {"semana": "2026-10-05", "itens": [{"cesta_id": 1, "produto": "Alface", "quantidade": 1}]}
+        corpo = {"semana": "2026-10-05", "itens": [{"cesta_id": 1, "produto_id": 1, "quantidade": 1}]}
         with patch.object(servico_ia, "confirmar", side_effect=ConfirmacaoRecusada("Nada foi gravado.")):
             self.assertEqual(self.cliente.post("/cestas/pre-preenchimento/confirmar", json=corpo).status_code, 409)
 
@@ -1073,7 +1142,7 @@ class TestesRotasDoPrePreenchimento(unittest.TestCase):
         ruins = [{"semana": "2026-10-05", "itens": []}]
         for quantidade in [1.5, "2", 0, -1, True]:
             ruins.append({"semana": "2026-10-05",
-                          "itens": [{"cesta_id": 1, "produto": "Alface", "quantidade": quantidade}]})
+                          "itens": [{"cesta_id": 1, "produto_id": 1, "quantidade": quantidade}]})
         with patch.object(servico_ia, "confirmar") as confirmar:
             for corpo in ruins:
                 self.assertEqual(self.cliente.post("/cestas/pre-preenchimento/confirmar",

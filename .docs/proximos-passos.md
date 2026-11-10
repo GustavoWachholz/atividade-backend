@@ -9,8 +9,9 @@
    encher e conclui; outro pedido é reprovado.
 4. **Rodar os 20 testes de banco no Postgres.** A `URL_DO_BANCO_TESTE` está vazia no `.env`: ela precisa de um banco vazio com
    sufixo `_teste`. Eles passaram com SQLite, mas ainda não rodaram no Postgres.
-5. **Decidir como comparar os nomes no estoque.** No Postgres, a comparação diferencia acento e maiúscula: "alface" e
-   "Alface" viram produtos diferentes. ?
+5. **Recriar o banco do Supabase para o catálogo de produtos.** A migration `0002` não copia dados: apague as
+   tabelas, rode `python criar_tabelas.py` e `alembic stamp head`, e cadastre de novo os usuários e os produtos.
+   (O antigo item "comparar os nomes no estoque" foi resolvido pelo catálogo, com nome único em `lower(nome)`.)
 6. **Atualizar o `README.md` e o `.docs/` para o Supabase.** Os passos de instalação ainda falam em MySQL.
 7. **Testar o README num clone limpo.** Rode `git clone <link> teste-readme` e siga o `README.md` sem pular passo:
    back, banco do zero, front e login com os dois perfis. Corrija o README onde travar.

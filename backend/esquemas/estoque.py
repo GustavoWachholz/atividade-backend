@@ -5,21 +5,23 @@ from pydantic import BaseModel, ConfigDict, Field
 from esquemas.cesta import TamanhoCesta
 
 
-# O produtor informa a semana, o produto e quantas unidades colheu.
-# extra="forbid" recusa campos a mais; str_strip_whitespace tira os espaços das pontas do nome.
+# O produtor informa a semana, o produto do catálogo e quantas unidades colheu.
+# extra="forbid" recusa campos a mais, como um nome_produto digitado.
 class EstoqueCriacao(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid")
     semana: date = Field(description="Segunda-feira da semana da colheita", examples=["2026-10-19"])
-    nome_produto: str = Field(min_length=1, max_length=100, examples=["Alface crespa"])
+    produto_id: int = Field(gt=0, strict=True, description="O id do produto no catálogo", examples=[1])
     # strict=True recusa 1.5, "2" e True, como na quantidade do produto separado.
     quantidade: int = Field(gt=0, strict=True, description="Unidades colhidas", examples=[10])
 
 
 # from_attributes lê o objeto SQLAlchemy Estoque na resposta do cadastro.
+# O nome_produto vem do catálogo (a propriedade do modelo), e não de uma coluna do estoque.
 class EstoqueResposta(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     semana: date
+    produto_id: int
     nome_produto: str
     quantidade: int
     criado_em: datetime
@@ -27,6 +29,7 @@ class EstoqueResposta(BaseModel):
 
 # Um produto do estoque com as contas da semana. Nada disso é coluna: o serviço calcula.
 class ItemDoEstoque(BaseModel):
+    produto_id: int
     nome_produto: str
     colhido: int = Field(description="Total colhido na semana")
     separado: int = Field(description="Quanto já foi separado nas cestas da semana")

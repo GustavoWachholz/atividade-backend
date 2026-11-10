@@ -26,7 +26,7 @@ produtor confirmar.
 2. Na separação, clica em "Pré-preencher com IA". A tela avisa quantas cestas ainda `pedida` ficam de fora.
 3. O back monta a entrada do modelo: o disponível de cada produto do estoque da semana e as cestas `em_separacao`
    da semana que ainda têm espaço, com id, tamanho, o que já foi separado e quanto ainda cabe.
-4. O modelo devolve um JSON com os itens de cada cesta (`cesta_id`, `produto`, `quantidade`).
+4. O modelo devolve um JSON com os itens de cada cesta (`cesta_id`, `produto_id`, `quantidade`).
 5. O serviço confere cada item, somando os itens da própria sugestão: a cesta é da semana e está `em_separacao`,
    cabe no espaço livre (5/8/12), o produto está no estoque da semana e a quantidade não passa do disponível.
 6. Se houver item inválido e ainda houver espaço e estoque, o back faz **uma** chamada de correção, com os motivos e
@@ -38,7 +38,7 @@ produtor confirmar.
 
 ### O que entra e o que sai
 
-- **Entra no modelo:** nomes e quantidades do estoque, ids e tamanhos das cestas e os produtos já separados.
+- **Entra no modelo:** o id, o nome e o disponível de cada produto do estoque, ids e tamanhos das cestas e os produtos já separados.
 - **Não entra:** nome, e-mail ou id da assinante. A IA não precisa saber de quem é a cesta.
 - **Sai do modelo:** só a sugestão em JSON. Quem confere e grava é o serviço, nunca o modelo.
 

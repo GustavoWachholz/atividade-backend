@@ -13,9 +13,11 @@ class PrePreenchimentoPedido(BaseModel):
 
 # O formato que o modelo precisa devolver. Sem restrição de valor de propósito: quem confere
 # quantidade, cesta e produto é o serviço, porque a resposta do modelo não é confiável.
+# O modelo devolve o produto pelo id do catálogo, e não pelo nome: assim um acento ou uma
+# maiúscula diferente não faz o item ser recusado.
 class ItemSugerido(BaseModel):
     cesta_id: int
-    produto: str
+    produto_id: int
     quantidade: int
 
 
@@ -23,8 +25,9 @@ class SugestaoDoModelo(BaseModel):
     itens: list[ItemSugerido]
 
 
-# Um produto do rascunho, já dentro da cesta dele.
+# Um produto do rascunho, já dentro da cesta dele. O nome vem do catálogo, para a tela.
 class ItemDoRascunho(BaseModel):
+    produto_id: int
     produto: str
     quantidade: int
 
@@ -39,6 +42,7 @@ class CestaDoRascunho(BaseModel):
 
 
 class ProdutoDoRascunho(BaseModel):
+    produto_id: int
     nome_produto: str
     disponivel: int = Field(description="O que ainda não foi gravado em nenhuma cesta")
 
@@ -46,6 +50,7 @@ class ProdutoDoRascunho(BaseModel):
 # Item que o serviço recusou mesmo depois da correção, com o motivo para a tela.
 class ItemDescartado(BaseModel):
     cesta_id: int
+    produto_id: int
     produto: str
     quantidade: int
     motivo: str
@@ -62,9 +67,9 @@ class RascunhoResposta(BaseModel):
 
 # Um item revisado pelo produtor. strict=True recusa 1.5, "2" e True.
 class ItemConfirmado(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid")
     cesta_id: int = Field(gt=0)
-    produto: str = Field(min_length=1, max_length=100)
+    produto_id: int = Field(gt=0, strict=True)
     quantidade: int = Field(gt=0, strict=True)
 
 

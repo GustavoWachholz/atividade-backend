@@ -166,3 +166,13 @@ dialog{border:1px solid #dce6d4;border-radius:22px;padding:30px 33px 31px;width:
 .draft-add select{display:block;width:100%;margin-top:4px;border:1px solid var(--border-default);border-radius:var(--radius-field);padding:0 10px;background:#fff}
 .draft-hint{font-size:13px;color:var(--feedback-warning);margin:14px 0 0}
 @media (max-width:680px){.ia-bar,.draft-heading{flex-direction:column;align-items:stretch}.ia-bar .btn{width:100%}.draft-panel{padding:18px}.draft-actions .btn{flex:1}}
+/* Catálogo de produtos: o select do estoque segue o campo de texto, e a tabela ganha ações por linha */
+.stock-form select{border:1px solid var(--border-default);border-radius:var(--radius-field);background:#fff;padding:11px 14px;font-size:14px;color:var(--text-primary);min-height:47px}
+.stock-form .stock-catalog-link{align-self:flex-start;background:none;border:0;padding:0;margin-top:8px;min-height:44px;text-align:left}
+.catalog-actions{white-space:nowrap}
+.catalog-actions .text-link,.catalog-rename .text-link{background:none;border:0;padding:0 0 0 14px;min-height:44px}
+.catalog-actions .text-link:disabled,.catalog-rename .text-link:disabled{opacity:.5;cursor:not-allowed}
+.catalog-rename{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
+.catalog-rename input{border:1px solid var(--border-default);border-radius:var(--radius-field);padding:8px 10px;font-size:14px;min-height:44px;flex:1 1 140px;min-width:0}
+.catalog-inactive td:first-child{color:var(--text-secondary)}
+@media (max-width:680px){.catalog-table th:nth-child(2),.catalog-table td:nth-child(2){display:none}.catalog-actions{white-space:normal}}

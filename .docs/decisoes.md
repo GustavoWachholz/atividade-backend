@@ -144,14 +144,15 @@
 - Ficou de fora: travar só a linha da cesta (não protege o estoque, que é dividido entre cestas) e travar o cadastro do estoque (cadastrar mais só aumenta o disponível). `with_for_update` e `isolation_level` não foram vistos em aula: aprovados por mim.
 - Onde está: `banco.py`, `repositorios/estoque.travar_semana`, `servicos/produto_separado.separar`. O pedido deixou de travar a semana porque não confere mais o estoque.
 
-## O produto separado se liga ao estoque pelo nome, sem chave estrangeira
+## O produto separado se liga ao estoque pelo nome, sem chave estrangeira (substituída pelo catálogo)
+- Substituída em 2026-11-10 por "Catálogo de produtos", abaixo: hoje a ligação é pela `produto_id`.
 - Decisão: o `produtos_separados` não mudou. O serviço procura o produto no estoque da semana da cesta pelo nome e grava o nome escrito como está no estoque.
 - Por quê: evita migration numa tabela que já tem dados e mantém o DER das entidades da cartilha. Gravar o nome do estoque faz as somas por produto baterem.
 - Ficou de fora: a coluna `estoque_id` (FK) no produto separado.
 - Onde está: `servicos/produto_separado.separar`, `servicos/estoque.disponivel_do_produto`.
 
 ## O mesmo produto na mesma semana soma, com UNIQUE no banco
-- Decisão: `UNIQUE(semana, nome_produto)`, e cadastrar de novo um produto que já está na semana soma a quantidade. A resposta é 201 nos dois casos.
+- Decisão: `UNIQUE(semana, produto_id)` (era `nome_produto` antes do catálogo), e cadastrar de novo um produto que já está na semana soma a quantidade. A resposta é 201 nos dois casos.
 - Por quê: a lista fica com uma linha por produto, e o banco impede a linha repetida mesmo se o serviço falhar.
 - Ficou de fora: recusar o segundo cadastro com 409 e guardar uma linha por colheita.
 - Onde está: `modelos/estoque.py`, `servicos/estoque.cadastrar`.
@@ -228,3 +229,45 @@
 - Por quê: esses arquivos guiavam a entrega e limitavam o desenvolvimento. O que o sistema faz continua descrito no `README.md` e no `docs/BRIEFING.md`.
 - Ficou de fora: as regras de negócio do sistema (limite de 5, 8 e 12, aprovação, estoque) e as proteções do banco de testes (sufixo `_teste`, banco vazio e diferente do principal), que protegem os dados reais.
 - Onde está: as menções a REGRAS, curso, aula e cartilha neste arquivo ficam como histórico das decisões.
+
+## Catálogo de produtos (pedido do autor, substitui o nome digitado)
+- Decisão: uma tabela `produtos` (nome, ativo), cadastrada uma vez pelo produtor na tela **Os produtos**. O estoque e o produto separado guardam só a `produto_id` (FK). No estoque, o produtor escolhe o produto numa lista e informa a quantidade.
+- Por quê: prepara a assinante marcar o que quer ou não receber, o que exige um produto com id fixo entre as semanas. Também acaba com "alface" e "Alface" virando dois produtos no Postgres, e com a IA recusando um item porque escreveu o nome diferente.
+- Ficou de fora: categoria e unidade de medida (tudo continua em unidades), um catálogo por produtor, e as preferências da assinante (próxima etapa).
+- Onde está: `modelos/produto.py`, `servicos/produto.py`, `rotas/produtos.py`, `Produtos` em `frontend/src/App.jsx`, migration `0002_catalogo_de_produtos`. O plano está em `.docs/plano-catalogo-produtos.md`.
+
+## O banco recomeça do zero com o catálogo
+- Decisão: a migration `0002` não copia dados: ela cria o `produtos` e troca `nome_produto` por `produto_id` no `estoques` e no `produtos_separados`. Com linhas nessas tabelas, a coluna NOT NULL não entra e a migration para antes de apagar qualquer nome. O Supabase é recriado com `criar_tabelas.py` e `alembic stamp head`.
+- Por quê: decidido pelo autor. Os dados atuais são de teste, e copiar exigiria juntar os nomes escritos de jeitos diferentes.
+- Ficou de fora: a migração dos nomes antigos para o catálogo. Os usuários precisam se cadastrar de novo.
+- Onde está: `migracoes/versions/0002_catalogo_de_produtos.py`.
+
+## Nome único sem contar maiúsculas, com índice no banco
+- Decisão: índice único `uq_produtos_nome` em `lower(nome)`. O serviço confere antes, para dar a frase "Já existe um produto chamado Alface."; se dois cadastros chegarem juntos, o `IntegrityError` do índice vira a mesma recusa (409).
+- Por quê: o nome digitado com outra maiúscula ou com espaço nas pontas (o esquema tira os espaços) criaria um produto repetido.
+- Ficou de fora: ignorar acentos ("Maca" e "Maçã" continuam diferentes), que exigiria a extensão `unaccent` no Postgres.
+- Onde está: `modelos/produto.py`, `servicos/produto.py`, `migracoes/versions/0002_catalogo_de_produtos.py`.
+
+## Desativar em vez de excluir
+- Decisão: não há `DELETE /produtos`. O `PATCH /produtos/{id}` com `{"ativo": false}` tira o produto da lista do estoque (`GET /produtos?ativos=true`), e `POST /estoques` recusa produto desativado ou inexistente com 409. Renomear muda o nome em todas as semanas, porque as outras tabelas guardam só o id.
+- Por quê: apagar um produto já separado quebraria o histórico das cestas.
+- Ficou de fora: recusar na separação o produto desativado que ainda tem estoque na semana. Ele foi colhido, então pode ir para as cestas; só não entra numa colheita nova.
+- Onde está: `servicos/produto.py` (`editar`, `buscar_ativo`), `servicos/estoque.cadastrar`, `rotas/estoques.py`.
+
+## Permissões do catálogo (assunto novo, marcado `# [NOVO · grupos]`)
+- Decisão: `catalogo:ver` para os dois grupos e `catalogo:editar` só para o produtor, com `exigir_ver_catalogo` e `exigir_editar_catalogo`.
+- Por quê: só o produtor sabe o que a horta produz. A assinante vai precisar ver o catálogo para marcar o que quer receber.
+- Ficou de fora: a tela da assinante para o catálogo (vem com as preferências).
+- Onde está: `seguranca.py` (`GRUPOS`), `rotas/autenticacao.py`, `rotas/produtos.py`.
+
+## A IA recebe e devolve o produto pelo id
+- Decisão: o estoque vai para o modelo como `{produto_id, produto, disponivel}`, e o modelo devolve `produto_id`. A conferência, o rascunho e a confirmação usam o id; o nome serve só à tela e às frases de recusa. Um id inventado aparece nos descartados como "Produto #id".
+- Por quê: com o nome, uma letra diferente fazia o item ser recusado. O nome continua no pedido porque ajuda o modelo a dar variedade.
+- Ficou de fora: mandar só o id, sem o nome.
+- Onde está: `servicos/pre_preenchimento.py`, `esquemas/pre_preenchimento.py`, `RascunhoDaIa` em `frontend/src/App.jsx`.
+
+## O produto vem do catálogo junto com o estoque, no mesmo SELECT
+- Decisão: `relationship("Produto", lazy="joined", innerjoin=True)` no `Estoque` e no `ProdutoSeparado`, e `with_for_update(of=Estoque)` no `travar_semana`.
+- Por quê: sem o `joined`, a lista da semana faria uma consulta por linha, cada uma uma ida ao Supabase. O Postgres não aceita `FOR UPDATE` no lado opcional de um `LEFT JOIN`, por isso o `innerjoin` (a `produto_id` nunca é nula); o `of=Estoque` trava só as linhas do estoque, e não os produtos do catálogo.
+- Ficou de fora: carregar o produto só quando a tela pede.
+- Onde está: `modelos/estoque.py`, `modelos/produto_separado.py`, `repositorios/estoque.py`.
