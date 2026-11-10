@@ -37,7 +37,7 @@ INSTRUCOES = """Você ajuda o produtor de uma horta comunitária a montar as ces
 Tarefa: distribua os produtos da lista "estoque" entre as cestas da lista "cestas".
 
 Regras obrigatórias:
-- Use só produtos do "estoque", com o nome escrito exatamente igual.
+- Use só produtos do "estoque", indicados pelo "produto_id" dele.
 - A soma de cada produto, em todas as cestas, não pode passar do "disponivel" dele.
 - A soma dos itens de cada cesta não pode passar do "espaco_livre" dela.
 - Use só os "cesta_id" informados e quantidades inteiras a partir de 1.
@@ -61,7 +61,8 @@ def estado_da_semana(sessao, semana):
     for cesta in cestas:
         if cesta.situacao != "em_separacao":
             continue
-        separados = [{"produto": p.nome_produto, "quantidade": p.quantidade} for p in cesta.produtos_separados]
+        separados = [{"produto_id": p.produto_id, "produto": p.nome_produto, "quantidade": p.quantidade}
+                     for p in cesta.produtos_separados]
         aprovadas.append({
             "cesta_id": cesta.id,
             "tamanho": cesta.tamanho,
@@ -69,9 +70,12 @@ def estado_da_semana(sessao, semana):
             "espaco_livre": LIMITES[cesta.tamanho] - sum(item["quantidade"] for item in separados),
             "ja_separados": separados,
         })
+    # disponivel e nomes usam o id do catálogo como chave; o nome serve só à tela e às frases de recusa.
+    itens = resumo_da_semana(sessao, semana)["itens"]
     return {
         "cestas": aprovadas,
-        "disponivel": {item["nome_produto"]: item["disponivel"] for item in resumo_da_semana(sessao, semana)["itens"]},
+        "disponivel": {item["produto_id"]: item["disponivel"] for item in itens},
+        "nomes": {item["produto_id"]: item["nome_produto"] for item in itens},
         "cestas_pedidas": sum(1 for cesta in cestas if cesta.situacao == "pedida"),
     }
 
@@ -87,28 +91,29 @@ def conferir_itens(itens, espaco, disponivel):
         motivo = None
         if item["cesta_id"] not in espaco:
             motivo = "A cesta não está em separação nesta semana."
-        elif item["produto"] not in disponivel:
+        elif item["produto_id"] not in disponivel:
             motivo = "O produto não está no estoque desta semana."
         elif item["quantidade"] < 1:
             motivo = "A quantidade precisa ser de pelo menos 1."
         elif item["quantidade"] > espaco[item["cesta_id"]]:
             motivo = f"Passa do espaço da cesta. Cabem só mais {espaco[item['cesta_id']]} itens."
-        elif item["quantidade"] > disponivel[item["produto"]]:
-            motivo = f"Passa do estoque. Restam só {disponivel[item['produto']]} unidades."
+        elif item["quantidade"] > disponivel[item["produto_id"]]:
+            motivo = f"Passa do estoque. Restam só {disponivel[item['produto_id']]} unidades."
         if motivo:
             recusados.append({**item, "motivo": motivo})
             continue
         espaco[item["cesta_id"]] -= item["quantidade"]
-        disponivel[item["produto"]] -= item["quantidade"]
+        disponivel[item["produto_id"]] -= item["quantidade"]
         validos.append(item)
     return validos, recusados, espaco, disponivel
 
 
 # Só o que o modelo precisa saber. A assinante fica de fora: nome, e-mail e id não saem do sistema.
-def montar_entrada(cestas, espaco, disponivel):
+# O produto vai com o id e o nome: o id é o que o modelo devolve, e o nome ajuda a dar variedade.
+def montar_entrada(cestas, espaco, disponivel, nomes):
     return {
-        "estoque": [{"produto": nome, "disponivel": quantidade}
-                    for nome, quantidade in disponivel.items() if quantidade > 0],
+        "estoque": [{"produto_id": produto_id, "produto": nomes[produto_id], "disponivel": quantidade}
+                    for produto_id, quantidade in disponivel.items() if quantidade > 0],
         "cestas": [{"cesta_id": cesta["cesta_id"], "tamanho": cesta["tamanho"],
                     "espaco_livre": espaco[cesta["cesta_id"]], "ja_separados": cesta["ja_separados"]}
                    for cesta in cestas if espaco[cesta["cesta_id"]] > 0],
@@ -154,7 +159,7 @@ def pedido_inicial(entrada):
 
 # A correção mostra só o que falta: o que foi recusado, com o motivo, e o que ainda sobra.
 def pedido_de_correcao(entrada, recusados):
-    motivos = [{"cesta_id": item["cesta_id"], "produto": item["produto"],
+    motivos = [{"cesta_id": item["cesta_id"], "produto_id": item["produto_id"],
                 "quantidade": item["quantidade"], "motivo": item["motivo"]} for item in recusados]
     return (f"{INSTRUCOES}\n\nOs itens abaixo foram recusados. Sugira substitutos usando só o que ainda sobra.\n"
             f"Recusados:\n{json.dumps(motivos, ensure_ascii=False)}\n\n"
@@ -162,19 +167,20 @@ def pedido_de_correcao(entrada, recusados):
 
 
 # Junta os itens de cada cesta para a tela, somando o produto que veio em duas linhas.
-def montar_cestas_do_rascunho(cestas, validos):
+def montar_cestas_do_rascunho(cestas, validos, nomes):
     resultado = []
     for cesta in cestas:
         quantidades = {}
         for item in validos:
             if item["cesta_id"] == cesta["cesta_id"]:
-                quantidades[item["produto"]] = quantidades.get(item["produto"], 0) + item["quantidade"]
+                quantidades[item["produto_id"]] = quantidades.get(item["produto_id"], 0) + item["quantidade"]
         resultado.append({
             "cesta_id": cesta["cesta_id"],
             "tamanho": cesta["tamanho"],
             "assinante": cesta["assinante"],
             "espaco_livre": cesta["espaco_livre"],
-            "itens": [{"produto": nome, "quantidade": qtd} for nome, qtd in quantidades.items()],
+            "itens": [{"produto_id": produto_id, "produto": nomes[produto_id], "quantidade": qtd}
+                      for produto_id, qtd in quantidades.items()],
         })
     return resultado
 
@@ -187,7 +193,8 @@ def sugerir(sessao, semana):
     cestas = [cesta for cesta in estado["cestas"] if cesta["espaco_livre"] > 0]
     if not cestas:
         raise NadaParaPreencher("Não há cesta aprovada com espaço nesta semana.")
-    disponivel = {nome: qtd for nome, qtd in estado["disponivel"].items() if qtd > 0}
+    disponivel = {produto_id: qtd for produto_id, qtd in estado["disponivel"].items() if qtd > 0}
+    nomes = estado["nomes"]
     if not disponivel:
         raise NadaParaPreencher("Não há estoque disponível nesta semana. Cadastre a colheita primeiro.")
     espaco = {cesta["cesta_id"]: cesta["espaco_livre"] for cesta in cestas}
@@ -196,7 +203,7 @@ def sugerir(sessao, semana):
     repositorio_cesta.encerrar_leitura(sessao)
 
     inicio = time.monotonic()
-    itens = chamar_modelo(pedido_inicial(montar_entrada(cestas, espaco, disponivel)))
+    itens = chamar_modelo(pedido_inicial(montar_entrada(cestas, espaco, disponivel, nomes)))
     validos, recusados, sobra_espaco, sobra_estoque = conferir_itens(itens, espaco, disponivel)
     ainda_invalidos = []
     # Só vale pedir substitutos se ainda há onde colocar, o que colocar e tempo para esperar.
@@ -204,7 +211,7 @@ def sugerir(sessao, semana):
     if (recusados and any(sobra_espaco.values()) and any(sobra_estoque.values())
             and restante >= MINIMO_PARA_CORRIGIR):
         try:
-            pedido = pedido_de_correcao(montar_entrada(cestas, sobra_espaco, sobra_estoque), recusados)
+            pedido = pedido_de_correcao(montar_entrada(cestas, sobra_espaco, sobra_estoque, nomes), recusados)
             novos, ainda_invalidos, sobra_espaco, sobra_estoque = conferir_itens(
                 chamar_modelo(pedido, tempo_limite=restante), sobra_espaco, sobra_estoque)
             validos = validos + novos
@@ -214,11 +221,15 @@ def sugerir(sessao, semana):
     # Um item recusado só interessa ao produtor se a cesta dele ficou com espaço vazio.
     sem_substituto = [item for item in recusados
                       if sobra_espaco.get(item["cesta_id"], 0) > 0 and item not in ainda_invalidos]
+    # Um id inventado pelo modelo não tem nome no catálogo da semana: a tela mostra o número.
+    descartados = [{**item, "produto": nomes.get(item["produto_id"], f"Produto #{item['produto_id']}")}
+                   for item in ainda_invalidos + sem_substituto]
     return {
         "semana": semana,
-        "cestas": montar_cestas_do_rascunho(cestas, validos),
-        "estoque": [{"nome_produto": nome, "disponivel": qtd} for nome, qtd in disponivel.items()],
-        "descartados": ainda_invalidos + sem_substituto,
+        "cestas": montar_cestas_do_rascunho(cestas, validos, nomes),
+        "estoque": [{"produto_id": produto_id, "nome_produto": nomes[produto_id], "disponivel": qtd}
+                    for produto_id, qtd in disponivel.items()],
+        "descartados": descartados,
         "cestas_pedidas": estado["cestas_pedidas"],
     }
 
@@ -234,8 +245,9 @@ def confirmar(sessao, dados):
     validos, recusados, _, _ = conferir_itens(itens, espaco, estado["disponivel"])
     if recusados:
         problema = recusados[0]
+        nome = estado["nomes"].get(problema["produto_id"], f"produto #{problema['produto_id']}")
         raise ConfirmacaoRecusada(
-            f"Nada foi gravado. Cesta #{problema['cesta_id']}, {problema['produto']}: {problema['motivo']}")
+            f"Nada foi gravado. Cesta #{problema['cesta_id']}, {nome}: {problema['motivo']}")
     repositorio_produto.salvar_varios(sessao, validos)
     return {"itens_gravados": len(validos),
             "cestas_atualizadas": len({item["cesta_id"] for item in validos})}

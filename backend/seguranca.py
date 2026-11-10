@@ -65,15 +65,20 @@ def ler_token(token: str):
 #   produtos:separar   POST /cestas/{id}/produtos
 #   estoque:cadastrar  POST /estoques (a colheita da semana)
 #   estoque:ver        GET /estoques (o que há na semana, e quais tamanhos estão liberados)
+#   catalogo:ver       GET /produtos (o catálogo de produtos da horta)
+#   catalogo:editar    POST e PATCH /produtos (cadastrar, renomear, desativar)
 # `{...}` com valores soltos é um set (conjunto): não repete itens e responde rápido ao `in`.
 GRUPOS = {
     # Aline: pede a cesta e acompanha só as dela.
     # Ela também vê o estoque, para saber o que vem na semana, mas não cadastra.
-    "assinante": {"conta:ver", "cestas:pedir", "cestas:ver", "estoque:ver"},
+    # Ela vê o catálogo, que vai servir para escolher o que quer ou não receber.
+    "assinante": {"conta:ver", "cestas:pedir", "cestas:ver", "estoque:ver",
+                  "catalogo:ver"},
     # Vanderlei: vê todas as cestas, separa os produtos e cadastra a colheita.
     "produtor": {"conta:ver", "cestas:ver", "cestas:ver_todas", "cestas:aprovar", "cestas:concluir",
                  "cestas:pre_preencher",
-                 "produtos:separar", "estoque:cadastrar", "estoque:ver"},
+                 "produtos:separar", "estoque:cadastrar", "estoque:ver",
+                 "catalogo:ver", "catalogo:editar"},
 }
 
 

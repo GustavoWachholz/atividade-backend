@@ -12,7 +12,7 @@ para estudar a responsabilidade de cada parte separadamente.
 | `servicos/` | a regra da cartilha e o que cada grupo vê. Recusa com exceção de `excecoes.py` | repositórios, `seguranca` e o esquema de saída (`CestaResposta`, no `detalhar`) |
 | `repositorios/` | as consultas e gravações. Recebe a sessão como primeiro parâmetro | modelos |
 | `esquemas/` | os esquemas Pydantic de entrada e de saída. A saída do usuário não tem senha nem hash | nada |
-| `modelos/` | os modelos SQLAlchemy: `Usuario`, `Cesta`, `ProdutoSeparado` e `Estoque` (a quarta tabela, fora da cartilha) | `banco.Base` |
+| `modelos/` | os modelos SQLAlchemy: `Usuario`, `Cesta`, `ProdutoSeparado`, `Estoque` e `Produto` (o estoque e o catálogo vieram depois da cartilha) | `banco.Base` |
 | `seguranca.py` | `gerar_hash`, `verificar_senha`, `criar_token`, `ler_token`, e a tabela `GRUPOS` com `tem_permissao`. Não importa nada do FastAPI | `configuracao` |
 | `configuracao.py` | o único arquivo que lê o `.env` | nada |
 
@@ -45,6 +45,8 @@ A trava é solta no commit, ou quando a sessão fecha sem commit (recusa).
 | `produtos:separar` | `POST /cestas/{id}/produtos` e `POST /cestas/pre-preenchimento/confirmar` | não | sim |
 | `estoque:cadastrar` | `POST /estoques` | não | sim |
 | `estoque:ver` | `GET /estoques` | sim | sim |
+| `catalogo:ver` | `GET /produtos` | sim | sim |
+| `catalogo:editar` | `POST /produtos` e `PATCH /produtos/{id}` | não | sim |
 
 O grupo é o valor de `usuarios.tipo`. As permissões ficam em `GRUPOS`, no `seguranca.py`.
 
@@ -52,7 +54,9 @@ O grupo é o valor de `usuarios.tipo`. As permissões ficam em `GRUPOS`, no `seg
 
 | Camada | Arquivo | O que faz |
 | --- | --- | --- |
-| rota | `rotas/estoques.py` | `POST /estoques` (cadastra ou soma) e `GET /estoques?semana=` (o resumo) |
+| rota | `rotas/estoques.py` | `POST /estoques` (cadastra ou soma, pela `produto_id`) e `GET /estoques?semana=` (o resumo) |
+| rota | `rotas/produtos.py` | o catálogo: `GET /produtos` (`?ativos=true` para as listas), `POST /produtos` e `PATCH /produtos/{id}` |
+| serviço | `servicos/produto.py` | `cadastrar` e `editar` (nome repetido vira `ProdutoRepetido`), e `buscar_ativo`, usado pelo estoque (`ProdutoIndisponivel`) |
 | serviço | `servicos/estoque.py` | `cadastrar`, `resumo_da_semana` e `disponivel_do_produto` |
 | serviço | `servicos/cesta.py` | `itens_livres_na_semana` (soma só as cestas `em_separacao`, para o resumo) e as decisões do pedido: `aprovar`, `reprovar` e `concluir`. Ficam aqui por usar os `LIMITES`, e o serviço do estoque importa daqui, sem import circular |
 | serviço | `servicos/produto_separado.py` | `separar` confere o limite da cesta e depois o estoque do produto |
@@ -79,12 +83,14 @@ A sugestão não trava nada. Só a confirmação trava a semana, confere de novo
 | A separação, com seletor de semana, filtro por tamanho e por assinante (pelo nome na cesta) | produtor | `Separacao`, com o `SeletorDeSemana` |
 | O rascunho da IA, editável, dentro da separação | produtor | `RascunhoDaIa` |
 | O fechamento (formulário que separa um produto, escolhido do estoque da semana da cesta, com a previsão da capacidade) | produtor | `FormularioDeProduto`, numa `Janela` |
-| O estoque (cadastro da colheita, semana a semana) | produtor | `Estoque`, com o `SeletorDeSemana` |
+| O estoque (cadastro da colheita, semana a semana, escolhendo o produto do catálogo) | produtor | `Estoque`, com o `SeletorDeSemana` |
+| Os produtos (o catálogo: cadastrar, renomear, desativar e reativar) | produtor | `Produtos` |
 
 A janela do pedido busca `GET /estoques` da semana atual só para listar os produtos colhidos; nenhum tamanho é bloqueado.
 A `Separacao` mostra, por situação: `pedida` com Aprovar e Reprovar; `em_separacao` com Separar produto e Concluir cesta (ligado só com a cesta cheia); `concluida` e `recusada` sem ação.
 `MinhasCestas` mostra a situação em `SituacaoDaCesta` e só lista os produtos de cesta `em_separacao` ou `concluida`. O PATCH fica em `decidirCesta`.
-O `FormularioDeProduto` e a tela `Estoque` usam o mesmo `buscarEstoque`.
+O `FormularioDeProduto` e a tela `Estoque` usam o mesmo `buscarEstoque`. A tela `Estoque` e a `Produtos` usam
+`buscarProdutos`, e os selects mandam a `produto_id` para o back.
 `MinhasCestas` e `Separacao` buscam os produtos das cestas da página ao mesmo tempo, com `buscarProdutosDasCestas` (`Promise.all`).
 
 O `App` guarda o `token` no `localStorage`, chama `/usuarios/eu` e escolhe a tela com `if` pelo `tipo`.

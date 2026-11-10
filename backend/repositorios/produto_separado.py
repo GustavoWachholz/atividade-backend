@@ -18,7 +18,7 @@ def listar_da_semana(sessao, semana):
 # só é solta no fim. O salvar abaixo não serve aqui, porque dá um commit por produto.
 def salvar_varios(sessao, itens):
     for item in itens:
-        sessao.add(ProdutoSeparado(cesta_id=item["cesta_id"], nome_produto=item["produto"],
+        sessao.add(ProdutoSeparado(cesta_id=item["cesta_id"], produto_id=item["produto_id"],
                                    quantidade=item["quantidade"]))
     sessao.commit()
 

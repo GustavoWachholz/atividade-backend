@@ -25,6 +25,14 @@ class EstoqueInsuficiente(Exception):
     """O produto não está no estoque da semana da cesta, ou a quantidade passa do que sobrou dele."""
 
 
+class ProdutoRepetido(Exception):
+    """Já existe no catálogo um produto com esse nome, sem contar maiúsculas."""
+
+
+class ProdutoIndisponivel(Exception):
+    """O produto não está no catálogo, ou está desativado."""
+
+
 class SemanaForaDoPedido(Exception):
     """O pedido só vale para a semana atual."""
 

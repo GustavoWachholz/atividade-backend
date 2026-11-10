@@ -105,6 +105,36 @@ function buscarEstoque(token, semanaISO, aoExpirar) {
   });
 }
 
+// Busca o catálogo de produtos. somenteAtivos=true serve às listas de escolha (estoque):
+// o produto desativado continua no histórico, mas não entra numa colheita nova.
+function buscarProdutos(token, aoExpirar, somenteAtivos = false) {
+  return fetch(`${URL_DA_API}/produtos${somenteAtivos ? '?ativos=true' : ''}`, {
+    headers: { Authorization: 'Bearer ' + token }
+  }).then((res) => {
+    if (res.status === 401) { aoExpirar(); throw new Error('Sua sessão expirou. Entre de novo.'); }
+    if (!res.ok) throw new Error('Não foi possível carregar os produtos.');
+    return res.json();
+  });
+}
+
+// POST (cadastrar) ou PATCH (renomear, desativar, reativar) no catálogo.
+// 409 traz a frase do serviço, como "Já existe um produto chamado Alface."
+function gravarProduto(token, metodo, caminho, corpo, aoExpirar) {
+  return fetch(`${URL_DA_API}/produtos${caminho}`, {
+    method: metodo,
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify(corpo)
+  }).then(async (res) => {
+    if (res.status === 401) { aoExpirar(); throw new Error('Sua sessão expirou. Entre de novo.'); }
+    if (res.status === 409) {
+      const erro = await res.json();
+      throw new Error(erro.detail || 'Já existe um produto com esse nome.');
+    }
+    if (!res.ok) throw new Error('Não foi possível salvar o produto.');
+    return res.json();
+  });
+}
+
 // Botões de página: o back pagina de 10 em 10. Se veio uma página cheia, pode haver uma próxima.
 function Paginacao({ pagina, setPagina, quantidade }) {
   if (pagina === 1 && quantidade < POR_PAGINA) return null;  // tudo coube numa página só
@@ -249,6 +279,7 @@ function Cabecalho({ usuario, aoSair, navegar, telaAtual }) {
             <>
               <button type="button" className={`nav-link ${telaAtual === 'separacao' ? 'active' : ''}`} onClick={() => navegar('separacao')}>A separação</button>
               <button type="button" className={`nav-link ${telaAtual === 'estoque' ? 'active' : ''}`} onClick={() => navegar('estoque')}>O estoque</button>
+              <button type="button" className={`nav-link ${telaAtual === 'produtos' ? 'active' : ''}`} onClick={() => navegar('produtos')}>Os produtos</button>
             </>
           )}
         </div>
@@ -559,11 +590,11 @@ function quantidadeValida(valor) {
   return valor !== '' && Number.isInteger(numero) && numero >= 1;
 }
 
-// Soma o que está no rascunho por produto, em todas as cestas, para mostrar o que sobra do estoque.
+// Soma o que está no rascunho por produto (pelo id do catálogo), em todas as cestas, para mostrar o que sobra do estoque.
 function somarPorProduto(cestas) {
   const soma = {};
   cestas.forEach((cesta) => cesta.itens.forEach((item) => {
-    soma[item.produto] = (soma[item.produto] || 0) + (quantidadeValida(item.quantidade) ? Number(item.quantidade) : 0);
+    soma[item.produto_id] = (soma[item.produto_id] || 0) + (quantidadeValida(item.quantidade) ? Number(item.quantidade) : 0);
   }));
   return soma;
 }
@@ -577,9 +608,9 @@ function somarCesta(cesta) {
 function RascunhoDaIa({ rascunho, setRascunho, aoConfirmar, aoDescartar, confirmando, erro }) {
   const { cestas, estoque, descartados, cestas_pedidas: cestasPedidas } = rascunho;
   const usados = somarPorProduto(cestas);
-  const sobra = (nome, disponivel) => disponivel - (usados[nome] || 0);
+  const sobra = (produto) => produto.disponivel - (usados[produto.produto_id] || 0);
   const totalDeItens = cestas.reduce((total, cesta) => total + cesta.itens.length, 0);
-  const estoqueEstourado = estoque.some((produto) => sobra(produto.nome_produto, produto.disponivel) < 0);
+  const estoqueEstourado = estoque.some((produto) => sobra(produto) < 0);
   const cestaEstourada = cestas.some((cesta) => somarCesta(cesta) > cesta.espaco_livre);
   const quantidadeRuim = cestas.some((cesta) => cesta.itens.some((item) => !quantidadeValida(item.quantidade)));
   const podeConfirmar = totalDeItens > 0 && !estoqueEstourado && !cestaEstourada && !quantidadeRuim;
@@ -629,8 +660,8 @@ function RascunhoDaIa({ rascunho, setRascunho, aoConfirmar, aoDescartar, confirm
 
     <div className="draft-stock" aria-label="O que sobra do estoque com este rascunho">
       {estoque.map((produto) => {
-        const resto = sobra(produto.nome_produto, produto.disponivel);
-        return <span key={produto.nome_produto} className={resto < 0 ? 'draft-stock-over' : ''}>
+        const resto = sobra(produto);
+        return <span key={produto.produto_id} className={resto < 0 ? 'draft-stock-over' : ''}>
           {produto.nome_produto}: <strong>sobra {resto}</strong>
         </span>;
       })}
@@ -640,8 +671,8 @@ function RascunhoDaIa({ rascunho, setRascunho, aoConfirmar, aoDescartar, confirm
       {cestas.map((cesta) => {
         const soma = somarCesta(cesta);
         const estourada = soma > cesta.espaco_livre;
-        const opcoes = estoque.filter((produto) => sobra(produto.nome_produto, produto.disponivel) > 0
-          && !cesta.itens.some((item) => item.produto === produto.nome_produto));
+        const opcoes = estoque.filter((produto) => sobra(produto) > 0
+          && !cesta.itens.some((item) => item.produto_id === produto.produto_id));
         return <article className="producer-entry" key={cesta.cesta_id}>
           <h3 className="entry-title">Cesta {tamanhos[cesta.tamanho]?.nome.toLowerCase()} #{cesta.cesta_id}</h3>
           <p className="entry-person">Assinante: <strong>{cesta.assinante}</strong></p>
@@ -650,7 +681,7 @@ function RascunhoDaIa({ rascunho, setRascunho, aoConfirmar, aoDescartar, confirm
           </p>
           {cesta.itens.length === 0 && <p className="entry-empty">Nenhum produto sugerido. O espaço fica vazio.</p>}
           {cesta.itens.map((item, indice) => (
-            <div className="draft-row" key={item.produto}>
+            <div className="draft-row" key={item.produto_id}>
               <label htmlFor={`qtd-${cesta.cesta_id}-${indice}`}>{item.produto}</label>
               <input
                 id={`qtd-${cesta.cesta_id}-${indice}`}
@@ -671,11 +702,16 @@ function RascunhoDaIa({ rascunho, setRascunho, aoConfirmar, aoDescartar, confirm
           {opcoes.length > 0 && soma < cesta.espaco_livre && (
             <label className="draft-add">
               Acrescentar produto
-              <select value="" onChange={(e) => mudarItens(cesta.cesta_id, (itens) => [
-                ...itens, { produto: e.target.value, quantidade: 1 }])}>
+              {/* O value do option é texto: o item novo guarda o id como número, igual aos que vieram do back */}
+              <select value="" onChange={(e) => {
+                const escolhido = opcoes.find((produto) => String(produto.produto_id) === e.target.value);
+                if (!escolhido) return;
+                mudarItens(cesta.cesta_id, (itens) => [
+                  ...itens, { produto_id: escolhido.produto_id, produto: escolhido.nome_produto, quantidade: 1 }]);
+              }}>
                 <option value="">Escolha um produto</option>
                 {opcoes.map((produto) => (
-                  <option key={produto.nome_produto} value={produto.nome_produto}>{produto.nome_produto}</option>
+                  <option key={produto.produto_id} value={produto.produto_id}>{produto.nome_produto}</option>
                 ))}
               </select>
             </label>
@@ -771,7 +807,7 @@ function Separacao({ token, abrirFechamento, aoExpirar, versao }) {
   // Se o back recusar, o rascunho continua na tela para o produtor ajustar.
   const confirmarRascunho = () => {
     const itens = rascunho.cestas.flatMap((cesta) => cesta.itens.map((item) => ({
-      cesta_id: cesta.cesta_id, produto: item.produto, quantidade: Number(item.quantidade)
+      cesta_id: cesta.cesta_id, produto_id: item.produto_id, quantidade: Number(item.quantidade)
     })));
     setConfirmando(true);
     setErroDaIa('');
@@ -945,14 +981,23 @@ function Separacao({ token, abrirFechamento, aoExpirar, versao }) {
 
 // Tela do estoque do produtor: cadastra o que foi colhido na semana e mostra o que sobrou de cada produto.
 // Começa na semana atual; as setas trocam de semana para cadastrar a colheita da próxima.
-function Estoque({ token, aoExpirar, versao, aoCadastrar }) {
+// O produto vem do catálogo (só os ativos); o produtor não digita mais o nome a cada semana.
+function Estoque({ token, aoExpirar, versao, aoCadastrar, navegar }) {
   const [semana, setSemana] = useState(() => dataISO(segundaDaSemana()));
   const [resumo, setResumo] = useState(null);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
-  const [nome, setNome] = useState('');
+  const [catalogo, setCatalogo] = useState(null);
+  // O value do select é texto; o id vira número só no envio.
+  const [produtoId, setProdutoId] = useState('');
   const [quantidade, setQuantidade] = useState('1');
   const [salvando, setSalvando] = useState(false);
+
+  useEffect(() => {
+    buscarProdutos(token, aoExpirar, true)
+      .then(setCatalogo)
+      .catch((err) => setErro(err.message));
+  }, [token]);
 
   // Busca de novo quando muda a semana ou quando o App avisa que algo foi gravado (versao)
   useEffect(() => {
@@ -967,22 +1012,27 @@ function Estoque({ token, aoExpirar, versao, aoCadastrar }) {
   const submeter = (e) => {
     e.preventDefault();
     const qtd = Number(quantidade);
-    if (!nome.trim()) { setErro('Informe o nome do produto colhido.'); return; }
+    if (!produtoId) { setErro('Escolha o produto colhido.'); return; }
     if (!Number.isInteger(qtd) || qtd < 1) { setErro('Informe uma quantidade inteira, a partir de 1.'); return; }
     setSalvando(true);
     setErro('');
     fetch(`${URL_DA_API}/estoques`, {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ semana, nome_produto: nome.trim(), quantidade: qtd })
+      body: JSON.stringify({ semana, produto_id: Number(produtoId), quantidade: qtd })
     })
-      .then((res) => {
+      .then(async (res) => {
         if (res.status === 401) { aoExpirar(); throw new Error('Sua sessão expirou. Entre de novo.'); }
+        // 409: o produto foi desativado em outra aba depois que a lista carregou
+        if (res.status === 409) {
+          const corpo = await res.json();
+          throw new Error(corpo.detail || 'Esse produto não pode entrar no estoque.');
+        }
         if (!res.ok) throw new Error('Não foi possível cadastrar o produto.');
         return res.json();
       })
       .then((salvo) => {
-        setNome('');
+        setProdutoId('');
         setQuantidade('1');
         // O back soma quando o produto já existe na semana; o aviso mostra o total que ficou.
         aoCadastrar(`${qtd} un. de ${salvo.nome_produto} no estoque. Total na semana: ${salvo.quantidade}.`);
@@ -1007,9 +1057,19 @@ function Estoque({ token, aoExpirar, versao, aoCadastrar }) {
     <div className="stock-layout">
       <form className="producer-entry stock-form" onSubmit={submeter}>
         <h2 className="entry-title">Registrar colheita</h2>
-        <label htmlFor="estoque-nome">Produto colhido</label>
-        <input id="estoque-nome" type="text" maxLength={100} placeholder="Ex.: Alface crespa"
-          value={nome} onChange={(e) => setNome(e.target.value)} />
+        <label htmlFor="estoque-produto">Produto colhido</label>
+        <select id="estoque-produto" value={produtoId} disabled={!catalogo || !catalogo.length}
+          onChange={(e) => setProdutoId(e.target.value)}>
+          <option value="">
+            {!catalogo ? 'Carregando os produtos...' : catalogo.length ? 'Escolha um produto' : 'Nenhum produto cadastrado'}
+          </option>
+          {(catalogo || []).map((produto) => (
+            <option key={produto.id} value={produto.id}>{produto.nome}</option>
+          ))}
+        </select>
+        <button type="button" className="text-link stock-catalog-link" onClick={() => navegar('produtos')}>
+          {catalogo && !catalogo.length ? 'Cadastrar os produtos da horta' : 'Falta um produto? Cadastre no catálogo'}
+        </button>
         <label htmlFor="estoque-quantidade">Quantidade (unidades)</label>
         <input id="estoque-quantidade" type="number" min="1" step="1"
           value={quantidade} onChange={(e) => setQuantidade(e.target.value)} />
@@ -1031,7 +1091,7 @@ function Estoque({ token, aoExpirar, versao, aoCadastrar }) {
               <thead><tr><th>Produto</th><th>Colhido</th><th>Separado</th><th>Disponível</th></tr></thead>
               <tbody>
                 {resumo.itens.map((item) => (
-                  <tr key={item.nome_produto}>
+                  <tr key={item.produto_id}>
                     <td>{item.nome_produto}</td>
                     <td>{item.colhido}</td>
                     <td>{item.separado}</td>
@@ -1044,6 +1104,129 @@ function Estoque({ token, aoExpirar, versao, aoCadastrar }) {
             <p className="entry-empty">Nada colhido nesta semana ainda. Enquanto o estoque estiver vazio, nenhuma cesta pode ser pedida.</p>
           )}
         </>}
+      </div>
+    </div>
+  </section>;
+}
+
+// Tela do catálogo do produtor: os produtos são cadastrados uma vez e valem para todas as semanas.
+// Não há excluir: desativar tira o produto das listas novas e mantém o histórico das cestas.
+function Produtos({ token, aoExpirar, aoAvisar }) {
+  const [produtos, setProdutos] = useState(null);
+  const [erro, setErro] = useState('');
+  const [nome, setNome] = useState('');
+  const [salvando, setSalvando] = useState(false);
+  // Produto em edição: { id, nome } com o nome que está sendo digitado, ou null.
+  const [editando, setEditando] = useState(null);
+  // Id do produto com um PATCH em andamento, para desligar os botões dele.
+  const [mudando, setMudando] = useState(null);
+
+  const carregar = () => buscarProdutos(token, aoExpirar)
+    .then(setProdutos)
+    .catch((err) => setErro(err.message));
+
+  useEffect(() => { carregar(); }, [token]);
+
+  const cadastrar = (e) => {
+    e.preventDefault();
+    if (!nome.trim()) { setErro('Informe o nome do produto.'); return; }
+    setSalvando(true);
+    setErro('');
+    gravarProduto(token, 'POST', '', { nome: nome.trim() }, aoExpirar)
+      .then((salvo) => {
+        setNome('');
+        aoAvisar(`${salvo.nome} entrou no catálogo.`);
+        return carregar();
+      })
+      .catch((err) => setErro(err.message))
+      .finally(() => setSalvando(false));
+  };
+
+  // Renomeia ou muda a situação; o nome novo aparece também no estoque e nas cestas já montadas.
+  const editar = (produto, corpo, mensagem) => {
+    setMudando(produto.id);
+    setErro('');
+    gravarProduto(token, 'PATCH', `/${produto.id}`, corpo, aoExpirar)
+      .then((salvo) => {
+        setEditando(null);
+        aoAvisar(mensagem(salvo));
+        return carregar();
+      })
+      .catch((err) => setErro(err.message))
+      .finally(() => setMudando(null));
+  };
+
+  const salvarNome = (e, produto) => {
+    e.preventDefault();
+    if (!editando.nome.trim()) { setErro('O nome do produto não pode ficar vazio.'); return; }
+    editar(produto, { nome: editando.nome.trim() }, (salvo) => `Produto renomeado para ${salvo.nome}.`);
+  };
+
+  return <section className="container workspace page" aria-labelledby="titulo-produtos">
+    <div className="workspace-heading">
+      <div>
+        <span className="section-overline">ÁREA DO PRODUTOR</span>
+        <h1 id="titulo-produtos">Os <span>produtos</span></h1>
+        <p>Cadastre uma vez o que a horta produz. No estoque, você escolhe o produto nesta lista e informa só a quantidade colhida.</p>
+      </div>
+    </div>
+
+    {erro && <div className="dialog-error" role="alert">{erro}</div>}
+
+    <div className="stock-layout">
+      <form className="producer-entry stock-form" onSubmit={cadastrar}>
+        <h2 className="entry-title">Novo produto</h2>
+        <label htmlFor="produto-nome">Nome do produto</label>
+        <input id="produto-nome" type="text" maxLength={100} placeholder="Ex.: Alface crespa"
+          value={nome} onChange={(e) => setNome(e.target.value)} />
+        <p className="dialog-hint">O nome não pode repetir, nem com maiúsculas diferentes.</p>
+        <button type="submit" className="btn btn-primary" disabled={salvando}>
+          {salvando ? 'Cadastrando...' : 'Cadastrar produto'} <Icone nome="check" />
+        </button>
+      </form>
+
+      <div className="producer-entry">
+        {!produtos ? <p>Carregando os produtos...</p> : produtos.length ? (
+          <table className="stock-table catalog-table">
+            <thead><tr><th>Produto</th><th>Situação</th><th>Ações</th></tr></thead>
+            <tbody>
+              {produtos.map((produto) => (
+                <tr key={produto.id} className={produto.ativo ? '' : 'catalog-inactive'}>
+                  <td>
+                    {editando?.id === produto.id ? (
+                      <form className="catalog-rename" onSubmit={(e) => salvarNome(e, produto)}>
+                        <input aria-label={`Novo nome para ${produto.nome}`} maxLength={100} autoFocus
+                          value={editando.nome} onChange={(e) => setEditando({ ...editando, nome: e.target.value })} />
+                        <button type="submit" className="text-link" disabled={mudando === produto.id}>Salvar</button>
+                        <button type="button" className="text-link" onClick={() => setEditando(null)}>Cancelar</button>
+                      </form>
+                    ) : produto.nome}
+                  </td>
+                  <td>
+                    <span className={`status-badge ${produto.ativo ? 'status-done' : 'status-refused'}`}>
+                      {produto.ativo ? 'Ativo' : 'Desativado'}
+                    </span>
+                  </td>
+                  <td className="catalog-actions">
+                    {editando?.id !== produto.id && (
+                      <button type="button" className="text-link" disabled={mudando === produto.id}
+                        onClick={() => setEditando({ id: produto.id, nome: produto.nome })}>
+                        Renomear
+                      </button>
+                    )}
+                    <button type="button" className="text-link" disabled={mudando === produto.id}
+                      onClick={() => editar(produto, { ativo: !produto.ativo },
+                        (salvo) => (salvo.ativo ? `${salvo.nome} voltou para as listas.` : `${salvo.nome} saiu das listas novas.`))}>
+                      {produto.ativo ? 'Desativar' : 'Reativar'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p className="entry-empty">Nenhum produto cadastrado ainda. Comece pelo que a horta colhe toda semana.</p>
+        )}
       </div>
     </div>
   </section>;
@@ -1067,6 +1250,7 @@ function Rodape({ navegar, usuario }) {
         </> : <>
           <button type="button" onClick={() => navegar('separacao')}>A separação</button>
           <button type="button" onClick={() => navegar('estoque')}>O estoque</button>
+          <button type="button" onClick={() => navegar('produtos')}>Os produtos</button>
         </>}
       </div>
       <div className="footer-message">
@@ -1173,7 +1357,8 @@ function Inicio({ pedir, navegar }) {
 // Formulário de separação de produto (exclusivo do produtor)
 // O produto vem de uma lista com o estoque da semana da cesta: só aparece o que ainda tem disponível.
 function FormularioDeProduto({ cesta, token, aoExpirar, aoCancelar, aoSalvar }) {
-  const [nome, setNome] = useState('');
+  // O value do select é o id do produto no catálogo, como texto.
+  const [produtoId, setProdutoId] = useState('');
   const [quantidade, setQuantidade] = useState('1');
   const [erro, setErro] = useState('');
   const [salvando, setSalvando] = useState(false);
@@ -1189,7 +1374,7 @@ function FormularioDeProduto({ cesta, token, aoExpirar, aoCancelar, aoSalvar }) 
   const limite = tamanhos[cesta.tamanho]?.limite || 5;
   const restante = Math.max(0, limite - itensSeparados(cesta));
   const produtosDisponiveis = estoque ? estoque.itens.filter((item) => item.disponivel > 0) : [];
-  const escolhido = produtosDisponiveis.find((item) => item.nome_produto === nome);
+  const escolhido = produtosDisponiveis.find((item) => String(item.produto_id) === produtoId);
   // A quantidade respeita as duas regras: o que cabe na cesta e o que sobrou do produto
   const maximo = escolhido ? Math.min(restante, escolhido.disponivel) : restante;
   // Previsão do espaço depois de registrar (styleguide, "O fechamento"): só com quantidade inteira que cabe
@@ -1219,7 +1404,7 @@ function FormularioDeProduto({ cesta, token, aoExpirar, aoCancelar, aoSalvar }) 
 
     setSalvando(true);
     setErro('');
-    aoSalvar(nome.trim(), qtd)
+    aoSalvar(escolhido, qtd)
       .catch((err) => setErro(err.message))
       .finally(() => setSalvando(false));
   };
@@ -1236,15 +1421,15 @@ function FormularioDeProduto({ cesta, token, aoExpirar, aoCancelar, aoSalvar }) 
       {/* O select só lista o que foi colhido na semana da cesta e ainda tem unidades */}
       <select
         id="nome-produto"
-        value={nome}
+        value={produtoId}
         disabled={!estoque || !produtosDisponiveis.length}
-        onChange={(e) => setNome(e.target.value)}
+        onChange={(e) => setProdutoId(e.target.value)}
       >
         <option value="">
           {!estoque ? 'Carregando o estoque...' : produtosDisponiveis.length ? 'Escolha um produto' : 'Nenhum produto disponível nesta semana'}
         </option>
         {produtosDisponiveis.map((item) => (
-          <option key={item.nome_produto} value={item.nome_produto}>
+          <option key={item.produto_id} value={item.produto_id}>
             {item.nome_produto} · {item.disponivel} disponíveis
           </option>
         ))}
@@ -1370,7 +1555,8 @@ export default function App() {
       .catch((err) => setErroPedido(err.message));
   };
 
-  const registrarProduto = async (nomeProduto, quantidade) => {
+  // produto é o item do estoque escolhido no formulário: o id vai para o back, o nome fica para o aviso.
+  const registrarProduto = async (produto, quantidade) => {
     if (!cestaEmFechamento) return;
     const res = await fetch(`${URL_DA_API}/cestas/${cestaEmFechamento.id}/produtos`, {
       method: 'POST',
@@ -1379,7 +1565,7 @@ export default function App() {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        nome_produto: nomeProduto,
+        produto_id: produto.produto_id,
         quantidade: quantidade
       })
     });
@@ -1398,7 +1584,7 @@ export default function App() {
 
     setCestaEmFechamento(null);
     setVersao((atual) => atual + 1);     // a contagem de itens da cesta é atualizada
-    setAviso(`${quantidade} un. de ${nomeProduto} adicionadas na cesta #${cestaEmFechamento.id}.`);
+    setAviso(`${quantidade} un. de ${produto.nome_produto} adicionadas na cesta #${cestaEmFechamento.id}.`);
   };
 
   // Slide 36b: Cada perfil cai na sua tela
@@ -1423,8 +1609,10 @@ export default function App() {
     <main id="conteudo" tabIndex="-1">
       {usuario.tipo === 'produtor' ? (
         tela === 'estoque' ? (
-          <Estoque token={token} aoExpirar={sair} versao={versao}
+          <Estoque token={token} aoExpirar={sair} versao={versao} navegar={setTela}
             aoCadastrar={(mensagem) => { setVersao((atual) => atual + 1); setAviso(mensagem); }} />
+        ) : tela === 'produtos' ? (
+          <Produtos token={token} aoExpirar={sair} aoAvisar={setAviso} />
         ) : (
           <Separacao token={token} abrirFechamento={setCestaEmFechamento} aoExpirar={sair} versao={versao} />
         )
@@ -1475,7 +1663,7 @@ export default function App() {
           ) : estoquePedido.itens.some((item) => item.disponivel > 0) ? (
             <ul>
               {estoquePedido.itens.filter((item) => item.disponivel > 0).map((item) => (
-                <li key={item.nome_produto}><Icone nome="leaf" /> {item.nome_produto}</li>
+                <li key={item.produto_id}><Icone nome="leaf" /> {item.nome_produto}</li>
               ))}
             </ul>
           ) : (

@@ -1,11 +1,14 @@
 from sqlalchemy import select
 
 from modelos.estoque import Estoque
+from modelos.produto import Produto
 
 
 # Os produtos colhidos numa semana, em ordem alfabética para a lista da tela.
+# O nome está no catálogo: o join com produtos permite ordenar por ele.
 def listar_da_semana(sessao, semana):
-    consulta = select(Estoque).where(Estoque.semana == semana).order_by(Estoque.nome_produto)
+    consulta = (select(Estoque).join(Estoque.produto).where(Estoque.semana == semana)
+                .order_by(Produto.nome))
     return sessao.scalars(consulta).all()
 
 
@@ -13,15 +16,16 @@ def listar_da_semana(sessao, semana):
 # with_for_update() vira SELECT ... FOR UPDATE: outra requisição que tentar travar a mesma
 # semana espera a primeira terminar. Assim dois pedidos, ou duas separações, ao mesmo tempo
 # não leem o mesmo "cabe mais 3" e gravam juntos. order_by(id) trava sempre na mesma ordem.
+# of=Estoque trava só as linhas do estoque, e não os produtos do catálogo que vêm no mesmo SELECT.
 def travar_semana(sessao, semana):
-    consulta = select(Estoque).where(Estoque.semana == semana).order_by(Estoque.id).with_for_update()
+    consulta = (select(Estoque).where(Estoque.semana == semana).order_by(Estoque.id)
+                .with_for_update(of=Estoque))
     return sessao.scalars(consulta).all()
 
 
-# Um produto da semana pelo nome, ou None. A comparação é feita pelo MySQL.
-def buscar(sessao, semana, nome_produto):
-    consulta = select(Estoque).where(Estoque.semana == semana,
-                                     Estoque.nome_produto == nome_produto)
+# Um produto da semana pelo id do catálogo, ou None.
+def buscar(sessao, semana, produto_id):
+    consulta = select(Estoque).where(Estoque.semana == semana, Estoque.produto_id == produto_id)
     return sessao.scalar(consulta)
 
 

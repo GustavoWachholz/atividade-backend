@@ -57,7 +57,7 @@ python criar_tabelas.py
 alembic stamp head
 ```
 
-O `criar_tabelas.py` cria as quatro tabelas já na versão final (as três da cartilha e o `estoques`), e o `alembic stamp head` avisa o Alembic que
+O `criar_tabelas.py` cria as cinco tabelas já na versão final (as três da cartilha, o `estoques` e o `produtos`), e o `alembic stamp head` avisa o Alembic que
 o banco está na última migration. Quem já tem o banco de uma versão anterior roda só `alembic upgrade head`.
 Para conferir: `alembic current` deve terminar em `(head)`.
 
@@ -84,7 +84,8 @@ A tela de login do front também tem a opção de cadastro. Depois:
 
 1. No `/docs`, clique em **Authorize**: o e-mail em `username` e a senha em `password`.
 2. No front, entre com cada perfil. A assinante cai no **Início**, e o produtor em **A separação**.
-   Antes de pedir uma cesta, entre como produtor e cadastre a colheita da semana em **O estoque**:
+   Antes de pedir uma cesta, entre como produtor, cadastre os produtos da horta em **Os produtos** e a colheita
+   da semana em **O estoque**:
    sem estoque, nenhum tamanho fica liberado.
 3. Testes automatizados: `python testar_backend.py`, dentro de `backend/`. Os testes de banco só rodam
    com `URL_DO_BANCO_TESTE` preenchida, e os outros rodam sem MySQL.
@@ -109,7 +110,10 @@ Sem ele, ou com o token inválido ou vencido (60 minutos), a resposta é **401**
 | PATCH | `/cestas/{cesta_id}/concluir` | conclui a cesta em separação, quando está cheia | grupo com `cestas:concluir`: produtor | 200 | 401 · 403 sem permissão · 404 cesta não existe · 409 não está em separação, ou não está cheia |
 | POST | `/cestas/pre-preenchimento` | pede à IA um rascunho das cestas da semana. Não grava nada | grupo com `cestas:pre_preencher`: produtor | 200 | 401 · 403 sem permissão · 409 sem cesta aprovada com espaço ou sem estoque · 422 dados inválidos · 503 a IA não respondeu |
 | POST | `/cestas/pre-preenchimento/confirmar` | confere de novo e grava o rascunho revisado, tudo ou nada | grupo com `produtos:separar`: produtor | 201 | 401 · 403 sem permissão · 409 algum item conflita, e nada foi gravado · 422 dados inválidos |
-| POST | `/estoques` | cadastra um produto colhido na semana. Se ele já está na semana, soma a quantidade | grupo com `estoque:cadastrar`: produtor | 201 | 401 · 403 sem permissão · 422 dados inválidos |
+| POST | `/estoques` | cadastra um produto do catálogo colhido na semana (`produto_id`). Se ele já está na semana, soma a quantidade | grupo com `estoque:cadastrar`: produtor | 201 | 401 · 403 sem permissão · 409 produto fora do catálogo ou desativado · 422 dados inválidos |
+| GET | `/produtos` | lista o catálogo de produtos; `?ativos=true` traz só os ativos | grupos com `catalogo:ver`: assinante e produtor | 200 | 401 · 403 sem permissão |
+| POST | `/produtos` | cadastra um produto no catálogo | grupo com `catalogo:editar`: produtor | 201 | 401 · 403 sem permissão · 409 nome repetido (sem contar maiúsculas) · 422 dados inválidos |
+| PATCH | `/produtos/{produto_id}` | renomeia, desativa ou reativa o produto | grupo com `catalogo:editar`: produtor | 200 | 401 · 403 sem permissão · 404 produto não existe · 409 nome repetido · 422 dados inválidos |
 | GET | `/estoques?semana=` | mostra o estoque da semana: colhido, separado e disponível de cada produto, e os tamanhos liberados | grupos com `estoque:ver`: assinante e produtor | 200 | 401 · 403 sem permissão · 422 semana ausente ou inválida |
 
 **401 ou 403?** O 401 responde "quem é você?": falta o token, ou ele não vale. O 403 responde "você pode fazer isto?":
@@ -133,7 +137,10 @@ o usuário foi identificado, mas o grupo dele não tem a permissão, ou a cesta 
 
 ### O estoque (pedido do autor, fora da cartilha)
 
-- O produtor cadastra quantas **unidades** de cada produto colheu na semana (a cartilha deixa de fora o estoque em quilos).
+- O produtor cadastra cada produto uma vez em **Os produtos** (o catálogo). O nome não repete, nem com maiúsculas
+  diferentes, e o produto é desativado em vez de excluído.
+- No estoque, ele escolhe o produto do catálogo e informa quantas **unidades** colheu na semana (a cartilha deixa de
+  fora o estoque em quilos).
 - **No pedido e na aprovação:** o estoque não é conferido. O produtor pode aprovar contando com a colheita que ainda
   vai lançar. O resumo do estoque mostra, só como informação, o total colhido e o reservado pelas cestas em separação.
 - **Na separação:** o produto precisa ter sido colhido na semana da cesta, e a quantidade não pode passar do que
@@ -162,8 +169,8 @@ backend/
 ├── servicos/            as regras e as exceções de recusa
 ├── repositorios/        as consultas ao banco
 ├── esquemas/            os esquemas Pydantic de entrada e de saída
-└── modelos/             os modelos SQLAlchemy das quatro tabelas
-frontend/                o React: login, telas da assinante e do produtor (separação e estoque)
+└── modelos/             os modelos SQLAlchemy das cinco tabelas
+frontend/                o React: login, telas da assinante e do produtor (separação, estoque e produtos)
 docs/                    briefing, DER, styleguide e marca
 .docs/                   o diário do projeto: arquitetura, decisões e próximos passos
 ```

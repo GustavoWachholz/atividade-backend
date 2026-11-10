@@ -10,9 +10,11 @@
 - Front em React com login, a tela de cada perfil e o token em todo fetch.
 - README de entrega e esta `.docs/`.
 - Pré-preenchimento das cestas com IA, em rascunho (falta testar com a chave real).
+- Catálogo de produtos: o produtor cadastra cada produto uma vez, e o estoque, a separação e a IA usam o id.
 
 ## Depois
 
+- A assinante marcar no catálogo os produtos que quer ou não receber, e a separação e a IA respeitarem isso.
 - Remover ou editar um produto já separado.
 - Guardar o rascunho para ele sobreviver a uma recarga da página.
 - Registrar quantas sugestões foram aceitas ou alteradas.

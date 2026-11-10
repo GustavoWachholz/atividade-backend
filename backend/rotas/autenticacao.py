@@ -105,4 +105,18 @@ def exigir_ver_estoque(usuario=Depends(obter_usuario_atual)):
     if not tem_permissao(usuario, "estoque:ver"):
         raise HTTPException(status_code=403, detail="Seu grupo não pode ver o estoque")
     return usuario
+
+
+# [NOVO · grupos] GET /produtos: os dois grupos veem o catálogo.
+def exigir_ver_catalogo(usuario=Depends(obter_usuario_atual)):
+    if not tem_permissao(usuario, "catalogo:ver"):
+        raise HTTPException(status_code=403, detail="Seu grupo não pode ver o catálogo")
+    return usuario
+
+
+# [NOVO · grupos] POST e PATCH /produtos: só o produtor mexe no catálogo.
+def exigir_editar_catalogo(usuario=Depends(obter_usuario_atual)):
+    if not tem_permissao(usuario, "catalogo:editar"):
+        raise HTTPException(status_code=403, detail="Seu grupo não pode editar o catálogo")
+    return usuario
 # ─── [FIM NOVO · grupos] ─────────────────────────────────────────────────────────────────
