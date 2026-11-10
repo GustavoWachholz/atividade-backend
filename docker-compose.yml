@@ -5,6 +5,7 @@ services:
       # o banco é o Supabase (Postgres), definido no .env da raiz
       URL_DO_BANCO: ${URL_DO_BANCO}
       CHAVE_DO_TOKEN: ${CHAVE_DO_TOKEN}
+      CHAVE_DA_IA: ${CHAVE_DA_IA:-}
       ORIGEM_FRONTEND: http://localhost:8080
 
   web:

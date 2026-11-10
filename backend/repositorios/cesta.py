@@ -42,6 +42,12 @@ def atualizar(sessao, cesta):
     return cesta
 
 
+# Fecha a transação de leitura e devolve a conexão, antes de uma espera longa fora do banco.
+# Depois disso os objetos lidos expiram, então o serviço já precisa ter copiado o que vai usar.
+def encerrar_leitura(sessao):
+    sessao.rollback()
+
+
 # Todas as cestas de uma semana, sem paginar: o serviço soma os limites das que estão em separação.
 # semana é a segunda-feira; >= e < pegam de segunda a domingo, mesmo se a cesta guardou outro dia.
 def listar_da_semana(sessao, semana):

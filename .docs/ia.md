@@ -2,38 +2,39 @@
 
 As linhas que terminam em `?` ainda precisam ser confirmadas.
 
-## Pré-preenchimento das cestas da semana · planejada
+## Pré-preenchimento das cestas da semana · implementada
 
-Combinada na aula 10 (2026-10-22). Nenhum código foi escrito: SDK, rota, serviço e chave ficam para o roadmap.
+Combinada em 2026-10-22 e implementada em 2026-11-05, com rascunho e Gemini 3.8 Flash. Falta testar com uma chave real.
 
 ### Ficha
 
 - **Perfil:** Vanderlei, produtor, no computador. A assinante não tem funcionalidade de IA nesta etapa.
 - **Dor:** na quinta ele monta as cestas "no chute" e precisa saber o que já foi e quanto cabe, para não
-  faltar nem sobrar (CARTILHA, "O negócio" e "Perfil B").
-- **Benefício:** com a colheita da semana já no estoque, a IA distribui os produtos entre todas as cestas
-  de uma vez. Ele só revisa e conclui.
+  faltar nem sobrar.
+- **Benefício:** com a colheita da semana já no estoque, a IA sugere a distribuição dos produtos entre todas
+  as cestas de uma vez. Ele só revisa e confirma.
 - **Por que esta opção:** das três discutidas (montar todas as cestas, completar uma cesta, colheita em
   texto livre), é a que mais tira trabalho da rotina, mesmo sendo a mais complexa.
-- **Tela:** A separação, com um botão "Pré-preencher com IA" na semana selecionada. ?
+- **Tela:** A separação, com um botão "Pré-preencher com IA" na semana selecionada.
 
 ### Fluxo
 
-O pedido agora passa pela aprovação do produtor (ver `decisoes.md`): a IA só atua nas cestas `em_separacao`,
-isto é, aprovadas e ainda não concluídas. A situação `concluida` já existe e é a conferência humana.
+A IA só atua nas cestas `em_separacao`, isto é, aprovadas e ainda não concluídas. Nada é gravado antes de o
+produtor confirmar.
 
-1. O produtor cadastra a colheita da semana em **O estoque**, como já funciona hoje (unidades).
-2. Na separação, clica em "Pré-preencher com IA".
-3. O back monta a entrada do modelo: o disponível de cada produto do estoque da semana e as cestas
-   `pedida`/`em_separacao` da semana, com id, tamanho, o que já foi separado e quanto ainda cabe.
+1. O produtor aprova os pedidos e cadastra a colheita da semana em **O estoque**, como já funciona hoje (unidades).
+2. Na separação, clica em "Pré-preencher com IA". A tela avisa quantas cestas ainda `pedida` ficam de fora.
+3. O back monta a entrada do modelo: o disponível de cada produto do estoque da semana e as cestas `em_separacao`
+   da semana que ainda têm espaço, com id, tamanho, o que já foi separado e quanto ainda cabe.
 4. O modelo devolve um JSON com os itens de cada cesta (`cesta_id`, `produto`, `quantidade`).
-5. O serviço confere cada item: cabe no espaço livre (5/8/12), não passa do disponível no estoque,
-   o produto está no estoque da semana e a cesta é da semana.
-6. Se houver item inválido, o back faz **uma** chamada de correção, com os motivos e o disponível que
-   sobrou, pedindo substitutos. O que continuar inválido é descartado, e o espaço fica vazio para o
-   produtor preencher à mão.
-7. O back grava os itens válidos, e a cesta vai para `em_separacao`.
-8. O produtor revisa, ajusta o que precisar pela separação de sempre e marca a cesta como `concluida`.
+5. O serviço confere cada item, somando os itens da própria sugestão: a cesta é da semana e está `em_separacao`,
+   cabe no espaço livre (5/8/12), o produto está no estoque da semana e a quantidade não passa do disponível.
+6. Se houver item inválido e ainda houver espaço e estoque, o back faz **uma** chamada de correção, com os motivos e
+   o disponível que sobrou, pedindo substitutos. O que continuar inválido é descartado, e o espaço fica vazio.
+7. O back devolve a sugestão para a tela, **sem gravar nada**.
+8. O produtor vê o rascunho, ajusta quantidades, tira ou acrescenta itens e clica em "Confirmar".
+9. O back trava a semana, confere tudo de novo e grava os itens num commit só. As cestas continuam `em_separacao`.
+10. Com a cesta cheia, o produtor marca `concluida`, como já funciona hoje.
 
 ### O que entra e o que sai
 
@@ -43,17 +44,23 @@ isto é, aprovadas e ainda não concluídas. A situação `concluida` já existe
 
 ### Quem confere
 
-- O serviço confere o formato e as duas recusas que já existem: `LimiteDaCestaExcedido` e `EstoqueInsuficiente`.
-- O produtor confere o conteúdo antes de marcar `concluida`.
-- **A assinante só vê os produtos da cesta depois de `concluida`.** Antes disso ela vê a cesta e a
-  situação, mas não a lista. Assim, nada do que a IA sugeriu chega a ela sem revisão.
+- O serviço confere o formato e as regras do limite e do estoque, na sugestão e de novo na confirmação.
+- O produtor confere o conteúdo antes de confirmar. Esse clique é a conferência humana.
+- A assinante continua vendo os produtos como hoje, porque só o que foi confirmado vira dado.
 
 ### Quando a IA erra ou não responde
 
-- Sem resposta, erro do provedor ou JSON fora do formato: nada é gravado, a tela mostra
-  "Não foi possível gerar a sugestão. Você pode separar manualmente." e o botão pode ser usado de novo. ?
+- Sem resposta, erro do provedor, chave ausente ou JSON fora do formato: nada muda, a tela mostra
+  "Não foi possível gerar a sugestão. Você pode separar manualmente." e o botão pode ser usado de novo.
 - Item inválido mesmo depois da correção: é descartado, e o espaço fica vazio.
+- Sem cesta aprovada ou sem estoque: o serviço recusa antes de chamar o modelo.
 - A separação manual continua funcionando igual. A IA é um atalho, não um caminho obrigatório.
+
+### Se algo mudar antes da confirmação
+
+- Se o estoque ou uma cesta mudar enquanto o rascunho está aberto, a confirmação recusa tudo, com o motivo, e
+  nada é gravado. O rascunho continua na tela para o produtor ajustar.
+- Recarregar a página perde o rascunho, e o produtor pede a sugestão de novo.
 
 ### Processamento
 
@@ -61,41 +68,36 @@ isto é, aprovadas e ainda não concluídas. A situação `concluida` já existe
 - **Não é agente com ferramentas**: o modelo não consulta nem grava nada sozinho.
 - **Não é multiagente**: é uma tarefa só, sobre os mesmos dados. A conferência do serviço faz o papel
   de revisor, de forma mais confiável.
-- **Provedor:** a definir entre Claude, Gemini e OpenAI. Os três têm saída em JSON estruturado. Preço e
-  uso gratuito devem ser conferidos na página oficial antes da escolha. ?
+- A sugestão não trava o estoque nem prende a conexão com o banco durante a chamada ao modelo. Só a confirmação trava.
+- **Provedor:** Gemini 3.8 Flash, no nível gratuito, pelo SDK `google-genai`. Foi escolhido por ter uso gratuito sem
+  conta de cobrança. Nesse nível o Google usa o conteúdo para melhorar os produtos, por isso nada da assinante é enviado.
+- O modelo é lido de `MODELO_DA_IA`, e cada chamada tem até 50 segundos, sem repetições automáticas.
 
-### O que muda além da cartilha (escolhas do autor)
+### Integração
 
-| Mudança | Por quê | O que defender |
-| --- | --- | --- |
-| A IA usa o estoque da semana | já existe, e é o que o produtor colheu | o estoque já é uma tabela fora da cartilha (ver `decisoes.md`) |
-| Situação `concluida` | marca que o produtor revisou a cesta | muda o `ENUM` `situacao_cesta` por migration |
-| A sugestão é gravada direto | um clique a menos para o produtor | a regra do curso pede conferência antes de virar dado. A conferência é o `concluida`, e a assinante não vê os produtos antes dele |
-| A assinante só vê os produtos depois de `concluida` | não mostrar sugestão não revisada | muda o que a cartilha descreve no Perfil A, item 3 |
-
-### Integração prevista com o back
-
-- Migration acrescentando `concluida` ao `ENUM` `situacao_cesta`.
-- Rota do pré-preenchimento e rota de concluir a cesta, com permissões novas nos `GRUPOS`
-  (ex.: `cestas:pre_preencher` e `cestas:concluir`, só no produtor). ?
-- Serviço do pré-preenchimento: monta a entrada, chama o modelo, confere, faz a correção e grava num commit só. ?
-- A listagem de produtos separados deixa de mostrar a lista para a assinante enquanto a cesta não for `concluida`.
-- A chave da API no `.env`, com o nome no `.env.exemplo`, lida pelo `configuracao.py`.
+- `POST /cestas/pre-preenchimento`: devolve a sugestão e não grava. Permissão `cestas:pre_preencher`, só no produtor.
+- `POST /cestas/pre-preenchimento/confirmar`: confere e grava em lote. Usa a permissão `produtos:separar`.
+- `servicos/pre_preenchimento.py`: monta a entrada, chama o modelo, faz a correção e confere os itens.
+- `salvar_varios`, em `repositorios/produto_separado.py`, grava num commit só, porque o `salvar` faz um commit por
+  item e soltaria a trava da semana.
+- Exceções `IaIndisponivel` (503), `NadaParaPreencher` (409) e `ConfirmacaoRecusada` (409), em `servicos/excecoes.py`.
+- `RascunhoDaIa`, na tela `Separacao`, em `frontend/src/App.jsx`.
+- `CHAVE_DA_IA` no `.env`, com o nome nos `.env.exemplo` e no `docker-compose.yml`, lida pelo `configuracao.py`.
+  Falta criá-la no projeto do Vercel. A API sobe mesmo sem ela: só o botão falha.
+- `maxDuration` de 120 segundos em `backend/vercel.json`, ainda não testado em deploy. ?
 
 ### Em aberto
 
-- **Conflito com o REGRAS:** "A IA nunca […] faz conta ou data que vira dado sem uma pessoa conferir". Neste plano,
-  a sugestão é gravada em `produtos_separados` antes da conferência, e o `concluida` vem depois. Proposta, ainda não
-  decidida: a sugestão volta só para a tela da separação como rascunho, o produtor ajusta e confirma, e só então o
-  serviço confere e grava (num commit só). Assim o `concluida` e a regra de esconder os produtos da assinante deixam
-  de ser necessários, e o Perfil A da cartilha não muda. ?
+- O que é uma boa cesta: o pedido usa variedade de produtos e cestas do mesmo tamanho parecidas entre si. Confirmar
+  com o produtor depois dos primeiros usos. ?
 
-- Resolvido no fluxo do pedido: a cesta `concluida` não aceita produtos (409), só se conclui uma cesta
-  `em_separacao` e cheia, e uma cesta `pedida` ou `recusada` não recebe produtos. O pré-preenchimento deve
-  ignorar tudo que não é `em_separacao`. ?
-- O que acontece se o estoque mudar depois do pré-preenchimento? ?
-- O status das recusas novas (concluir uma cesta inválida, por exemplo) é escolhido na implementação.
+### Pedido e testes
 
-### Pedido testado e testes
+O pedido ao modelo está em `INSTRUCOES`, no `servicos/pre_preenchimento.py`.
 
-Ainda não feito. É a próxima etapa da aula 10 (prompt de construção e três casos de teste).
+- **Automatizados:** o `testar_backend.py` cobre a conferência, a correção, o descarte, as recusas e as permissões, sempre
+  com modelo falso. Em 2026-11-05 os 70 testes passaram com um SQLite temporário, e não no Postgres.
+- **No navegador:** a tela foi testada com as rotas reais, SQLite e modelo falso: rascunho, ajustes, confirmação, conflito,
+  falha da IA e tela de celular.
+- **Contra a API real do Gemini:** só as falhas foram testadas (chave inválida e timeout). **A qualidade da sugestão ainda não
+  foi testada**, porque falta a chave.

@@ -9,3 +9,10 @@
 - MySQL com Alembic, e banco do zero com `criar_tabelas.py` e `alembic stamp head`.
 - Front em React com login, a tela de cada perfil e o token em todo fetch.
 - README de entrega e esta `.docs/`.
+- Pré-preenchimento das cestas com IA, em rascunho (falta testar com a chave real).
+
+## Depois
+
+- Remover ou editar um produto já separado.
+- Guardar o rascunho para ele sobreviver a uma recarga da página.
+- Registrar quantas sugestões foram aceitas ou alteradas.

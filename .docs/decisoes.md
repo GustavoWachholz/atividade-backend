@@ -205,14 +205,26 @@
 - Ficou de fora: prever também o estoque do produto depois da inclusão (o select já mostra o disponível).
 - Onde está: `FormularioDeProduto` e `textoCapacidade` em `frontend/src/App.jsx`.
 
-## A IA pré-preenche as cestas da semana (planejada, aula 10)
-- Decisão: o produtor pede uma sugestão de montagem de todas as cestas da semana, a partir do estoque. O serviço confere e grava os itens válidos, e o produtor revisa e marca a cesta como `concluida`. A assinante só vê os produtos depois disso.
-- Por quê: é a opção que mais tira o "no chute" da rotina de quinta. As recusas que já existem continuam no serviço, e o `concluida` é a conferência humana.
-- Ficou de fora: agente com ferramentas e multiagente (basta uma chamada e uma correção), IA para a assinante e rascunho só na tela.
-- Onde está: planejamento em `.docs/ia.md`. Ainda não há código.
+## A IA sugere as cestas da semana num rascunho (substitui a gravação direta)
+- Decisão: o produtor pede uma sugestão de montagem de todas as cestas da semana, a partir do estoque. A sugestão volta como rascunho editável na tela, sem gravar nada. Ao confirmar, o serviço trava a semana, confere tudo de novo e grava num commit só.
+- Por quê: é a opção que mais tira o "no chute" da rotina de quinta, e nada do que a IA sugere vira dado antes de uma pessoa conferir. A gravação direta exigiria uma rota para remover produtos, que não existe, e esconder os produtos da assinante.
+- Ficou de fora: gravação direta, esconder os produtos da assinante até `concluida`, guardar o rascunho no banco, agente com ferramentas, multiagente (basta uma chamada e uma correção) e IA para a assinante.
+- Onde está: `servicos/pre_preenchimento.py`, `rotas/pre_preenchimento.py`, `RascunhoDaIa` em `frontend/src/App.jsx`, `.docs/ia.md`.
+
+## O provedor da IA é o Gemini 3.8 Flash, no nível gratuito
+- Decisão: o modelo `gemini-3.8-flash`, pelo SDK `google-genai` e pelo `client.interactions`, com a versão do SDK fixa.
+- Por quê: o custo por uso é baixo nos três provedores, e o Gemini tem uso gratuito sem conta de cobrança. Nesse nível o Google usa o conteúdo para melhorar os produtos, o que pesa pouco aqui: só vão nomes de produtos, quantidades e ids de cestas.
+- Ficou de fora: Claude Haiku 5.5 e OpenAI gpt-6-luna, pagos. O Haiku é o plano B, e trocar é mexer só na `chamar_modelo`.
+- Onde está: `chamar_modelo` em `servicos/pre_preenchimento.py`. A versão é fixa porque as falhas do `interactions` vêm de um módulo interno do SDK (`GeminiNextGenAPIClientError`), que não herda de `errors.APIError`.
 
 ## O .env.production tem só /api
 - Decisão: `frontend/.env.production` guarda apenas `VITE_URL_DA_API=/api`. O front lê o endereço em `src/api.js`.
 - Por quê: em produção o Caddy serve o build e repassa `/api` à API na mesma origem (porta 8080), então basta o caminho relativo, sem host nem porta, e sem CORS. Variáveis `VITE_` vão para o JavaScript do navegador, então não podem ter segredo.
 - Ficou de fora: domínio e HTTPS (próxima aula). O `.env.development` também vale `/api`, pois o proxy do Vite já repassa ao backend.
 - Onde está: `frontend/.env.*`, `frontend/src/api.js`, `Caddyfile`, `.docs/infra.md`.
+
+## As regras do curso deixaram de valer
+- Decisão: com o trabalho entregue e apresentado, o `REGRAS.md` e o `docs/CARTILHA.md` saíram do repositório. Vetos de biblioteca, de estilo de código, de banco e do módulo de IA não valem mais, e os testes de banco aceitam outro banco além do MySQL.
+- Por quê: esses arquivos guiavam a entrega e limitavam o desenvolvimento. O que o sistema faz continua descrito no `README.md` e no `docs/BRIEFING.md`.
+- Ficou de fora: as regras de negócio do sistema (limite de 5, 8 e 12, aprovação, estoque) e as proteções do banco de testes (sufixo `_teste`, banco vazio e diferente do principal), que protegem os dados reais.
+- Onde está: as menções a REGRAS, curso, aula e cartilha neste arquivo ficam como histórico das decisões.
