@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 
 from google import genai
 from google.genai import errors as erros_do_gemini
@@ -11,7 +12,7 @@ from google.genai import types
 from google.genai._gaos.lib.compat_errors import GeminiNextGenAPIClientError
 from pydantic import ValidationError
 
-from configuracao import CHAVE_DA_IA, MODELO_DA_IA
+from configuracao import CHAVE_DA_IA, MODELOS_DA_IA
 from esquemas.pre_preenchimento import SugestaoDoModelo
 from repositorios import cesta as repositorio_cesta
 from repositorios import estoque as repositorio_estoque
@@ -22,8 +23,12 @@ from servicos.excecoes import ConfirmacaoRecusada, IaIndisponivel, NadaParaPreen
 
 registro = logging.getLogger(__name__)
 
-# Tempo máximo de cada chamada. Com a correção, são no máximo duas, dentro do maxDuration do vercel.json.
-TEMPO_LIMITE_SEGUNDOS = 50
+# O tempo do provedor varia muito no nível gratuito. A primeira chamada tem até 60 s (até 30 s por modelo), e o processo inteiro
+# até 100 s, abaixo dos 120 s do maxDuration do vercel.json. A correção só acontece se sobrar tempo.
+TEMPO_LIMITE_SEGUNDOS = 60
+TEMPO_POR_MODELO = 30
+TEMPO_TOTAL_SEGUNDOS = 100
+MINIMO_PARA_CORRIGIR = 15
 MENSAGEM_DE_FALHA = "Não foi possível gerar a sugestão. Você pode separar manualmente."
 
 # Contexto, tarefa, formato e limites do pedido. O critério de boa cesta está aqui.
@@ -111,29 +116,36 @@ def montar_entrada(cestas, espaco, disponivel):
 
 
 # A única função que fala com o provedor. Devolve os itens como dicionários, ou levanta IaIndisponivel.
-# attempts=1 desliga as repetições automáticas: sem isso, o tempo total passaria do limite da função.
+# No nível gratuito, um modelo às vezes fica sobrecarregado (erro 503) enquanto outro responde em segundos.
+# Por isso tenta os modelos de MODELOS_DA_IA em ordem, cada um com até TEMPO_POR_MODELO, sem passar de tempo_limite.
+# attempts=1 desliga as repetições automáticas do SDK, que estourariam o tempo da função.
 # store=False pede ao Gemini para não guardar a conversa, que aqui não tem continuação.
-def chamar_modelo(texto):
+def chamar_modelo(texto, tempo_limite=TEMPO_LIMITE_SEGUNDOS):
     if not CHAVE_DA_IA:
         raise IaIndisponivel(MENSAGEM_DE_FALHA)
     cliente = genai.Client(api_key=CHAVE_DA_IA,
                            http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=1)))
-    try:
-        resposta = cliente.interactions.create(
-            model=MODELO_DA_IA,
-            input=texto,
-            store=False,
-            timeout=TEMPO_LIMITE_SEGUNDOS,
-            response_format={"type": "text", "mime_type": "application/json",
-                             "schema": SugestaoDoModelo.model_json_schema()},
-        )
-        sugestao = SugestaoDoModelo.model_validate_json(resposta.output_text)
-    except (GeminiNextGenAPIClientError, erros_do_gemini.APIError,
-            erros_do_gemini.ContinuationInterruptedError, ValidationError) as erro:
-        # Só o tipo da falha vai para o log: a mensagem do provedor pode trazer dados do pedido.
-        registro.warning("Falha ao gerar a sugestão: %s", type(erro).__name__)
-        raise IaIndisponivel(MENSAGEM_DE_FALHA)
-    return [item.model_dump() for item in sugestao.itens]
+    prazo = time.monotonic() + tempo_limite
+    for modelo in MODELOS_DA_IA:
+        restante = prazo - time.monotonic()
+        if restante < 5:
+            break
+        try:
+            resposta = cliente.interactions.create(
+                model=modelo,
+                input=texto,
+                store=False,
+                timeout=min(TEMPO_POR_MODELO, restante),
+                response_format={"type": "text", "mime_type": "application/json",
+                                 "schema": SugestaoDoModelo.model_json_schema()},
+            )
+            sugestao = SugestaoDoModelo.model_validate_json(resposta.output_text)
+            return [item.model_dump() for item in sugestao.itens]
+        except (GeminiNextGenAPIClientError, erros_do_gemini.APIError,
+                erros_do_gemini.ContinuationInterruptedError, ValidationError) as erro:
+            # Só o modelo e o tipo da falha vão para o log: a mensagem do provedor pode trazer dados do pedido.
+            registro.warning("Falha ao gerar a sugestão com %s: %s", modelo, type(erro).__name__)
+    raise IaIndisponivel(MENSAGEM_DE_FALHA)
 
 
 def pedido_inicial(entrada):
@@ -183,15 +195,18 @@ def sugerir(sessao, semana):
     # Fecha a transação de leitura: a chamada ao modelo demora, e a conexão com o banco não fica presa.
     repositorio_cesta.encerrar_leitura(sessao)
 
+    inicio = time.monotonic()
     itens = chamar_modelo(pedido_inicial(montar_entrada(cestas, espaco, disponivel)))
     validos, recusados, sobra_espaco, sobra_estoque = conferir_itens(itens, espaco, disponivel)
     ainda_invalidos = []
-    # Só vale pedir substitutos se ainda há onde colocar e o que colocar.
-    if recusados and any(sobra_espaco.values()) and any(sobra_estoque.values()):
+    # Só vale pedir substitutos se ainda há onde colocar, o que colocar e tempo para esperar.
+    restante = TEMPO_TOTAL_SEGUNDOS - (time.monotonic() - inicio)
+    if (recusados and any(sobra_espaco.values()) and any(sobra_estoque.values())
+            and restante >= MINIMO_PARA_CORRIGIR):
         try:
             pedido = pedido_de_correcao(montar_entrada(cestas, sobra_espaco, sobra_estoque), recusados)
             novos, ainda_invalidos, sobra_espaco, sobra_estoque = conferir_itens(
-                chamar_modelo(pedido), sobra_espaco, sobra_estoque)
+                chamar_modelo(pedido, tempo_limite=restante), sobra_espaco, sobra_estoque)
             validos = validos + novos
         except IaIndisponivel:
             # A primeira resposta continua valendo: o que falhou fica vazio para o produtor preencher.

@@ -4,7 +4,7 @@ As linhas que terminam em `?` ainda precisam ser confirmadas.
 
 ## Pré-preenchimento das cestas da semana · implementada
 
-Combinada em 2026-10-22 e implementada em 2026-11-05, com rascunho e Gemini 3.8 Flash. Falta testar com uma chave real.
+Combinada em 2026-10-22, implementada em 2026-11-05 e publicada em 2026-11-10, com rascunho e Gemini Flash-Lite.
 
 ### Ficha
 
@@ -69,9 +69,13 @@ produtor confirmar.
 - **Não é multiagente**: é uma tarefa só, sobre os mesmos dados. A conferência do serviço faz o papel
   de revisor, de forma mais confiável.
 - A sugestão não trava o estoque nem prende a conexão com o banco durante a chamada ao modelo. Só a confirmação trava.
-- **Provedor:** Gemini 3.8 Flash, no nível gratuito, pelo SDK `google-genai`. Foi escolhido por ter uso gratuito sem
+- **Provedor:** Gemini, no nível gratuito, pelo SDK `google-genai`. Foi escolhido por ter uso gratuito sem
   conta de cobrança. Nesse nível o Google usa o conteúdo para melhorar os produtos, por isso nada da assinante é enviado.
-- O modelo é lido de `MODELO_DA_IA`, e cada chamada tem até 50 segundos, sem repetições automáticas.
+- **Modelos:** `MODELOS_DA_IA` lista os modelos em ordem (padrão: `gemini-3.5-flash-lite`, depois `gemini-3.1-flash-lite`).
+  Se um estiver sobrecarregado ou demorar mais de 30 s, o seguinte é tentado. A primeira sugestão tem até 60 s, e o
+  processo inteiro até 100 s; a correção só acontece se sobrar ao menos 15 s.
+- **Por que não o 3.8 Flash:** em 2026-11-10 ele estourou os 50 s em produção e levou 83 s numa semana de 10 cestas,
+  mesmo com raciocínio baixo. Os Flash-Lite responderam em 3 a 24 s, mas às vezes devolvem 503 por excesso de demanda.
 
 ### Integração
 

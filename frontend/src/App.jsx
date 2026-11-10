@@ -846,6 +846,9 @@ function Separacao({ token, abrirFechamento, aoExpirar, versao }) {
         </button>
       </div>
     )}
+    {!rascunho && sugerindo && (
+      <p className="ia-waiting" role="status">A IA está montando a sugestão. Isso pode levar até um minuto.</p>
+    )}
     {!rascunho && erroDaIa && <div className="dialog-error" role="alert">{erroDaIa}</div>}
     {avisoDaIa && <p className="ia-success" role="status">{avisoDaIa}</p>}
     {rascunho && (

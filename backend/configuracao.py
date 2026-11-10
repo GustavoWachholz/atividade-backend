@@ -11,7 +11,11 @@ URL_DO_BANCO_TESTE = os.getenv("URL_DO_BANCO_TESTE")
 ORIGEM_FRONTEND = os.getenv("ORIGEM_FRONTEND", "http://localhost:5173")
 # A chave é opcional: sem ela a API sobe normalmente, e só o pré-preenchimento fica indisponível.
 CHAVE_DA_IA = os.getenv("CHAVE_DA_IA")
-MODELO_DA_IA = os.getenv("MODELO_DA_IA", "gemini-3.8-flash")
+# Os modelos tentados em ordem, separados por vírgula. Os Flash-Lite responderam em 3 a 24 s nos testes;
+# o 3.8 Flash passou de 50 s e estourava o tempo. Se um estiver sobrecarregado, o seguinte é tentado.
+MODELOS_DA_IA = [modelo.strip() for modelo in
+                 os.getenv("MODELOS_DA_IA", "gemini-3.5-flash-lite,gemini-3.1-flash-lite").split(",")
+                 if modelo.strip()]
 
 
 # obter_configuracao reúne os valores que o seguranca.py precisa sem importar variáveis soltas.

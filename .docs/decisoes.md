@@ -211,8 +211,8 @@
 - Ficou de fora: gravação direta, esconder os produtos da assinante até `concluida`, guardar o rascunho no banco, agente com ferramentas, multiagente (basta uma chamada e uma correção) e IA para a assinante.
 - Onde está: `servicos/pre_preenchimento.py`, `rotas/pre_preenchimento.py`, `RascunhoDaIa` em `frontend/src/App.jsx`, `.docs/ia.md`.
 
-## O provedor da IA é o Gemini 3.8 Flash, no nível gratuito
-- Decisão: o modelo `gemini-3.8-flash`, pelo SDK `google-genai` e pelo `client.interactions`, com a versão do SDK fixa.
+## O provedor da IA é o Gemini, no nível gratuito
+- Decisão: os modelos `gemini-3.5-flash-lite` e, se ele falhar, `gemini-3.1-flash-lite`, pelo SDK `google-genai` e pelo `client.interactions`, com a versão do SDK fixa. O `gemini-3.8-flash`, escolhido antes, demorava mais que o limite (ver `ia.md`).
 - Por quê: o custo por uso é baixo nos três provedores, e o Gemini tem uso gratuito sem conta de cobrança. Nesse nível o Google usa o conteúdo para melhorar os produtos, o que pesa pouco aqui: só vão nomes de produtos, quantidades e ids de cestas.
 - Ficou de fora: Claude Haiku 5.5 e OpenAI gpt-6-luna, pagos. O Haiku é o plano B, e trocar é mexer só na `chamar_modelo`.
 - Onde está: `chamar_modelo` em `servicos/pre_preenchimento.py`. A versão é fixa porque as falhas do `interactions` vêm de um módulo interno do SDK (`GeminiNextGenAPIClientError`), que não herda de `errors.APIError`.

@@ -923,6 +923,24 @@ class TestesPrePreenchimento(unittest.TestCase):
         self.assertEqual(chamar.call_count, 1)
         self.assertEqual(rascunho["descartados"], [])
 
+    # Se a primeira resposta demorou demais, não há tempo para a correção: o espaço fica vazio e é avisado.
+    def test_sem_tempo_nao_faz_correcao(self):
+        primeira = [{"cesta_id": 1, "produto": "Alface", "quantidade": 3},
+                    {"cesta_id": 1, "produto": "Abacaxi", "quantidade": 2}]
+        with patch.object(servico_ia.time, "monotonic", side_effect=[0, 95]):
+            with patch.object(servico_ia, "chamar_modelo", return_value=primeira) as chamar:
+                rascunho = servico_ia.sugerir(Mock(), date(2026, 10, 5))
+        self.assertEqual(chamar.call_count, 1)
+        self.assertEqual(rascunho["descartados"][0]["produto"], "Abacaxi")
+
+    # A correção recebe só o tempo que ainda sobra do total.
+    def test_correcao_usa_o_tempo_que_sobra(self):
+        primeira = [{"cesta_id": 1, "produto": "Abacaxi", "quantidade": 2}]
+        with patch.object(servico_ia.time, "monotonic", side_effect=[0, 30]):
+            with patch.object(servico_ia, "chamar_modelo", side_effect=[primeira, []]) as chamar:
+                servico_ia.sugerir(Mock(), date(2026, 10, 5))
+        self.assertEqual(chamar.call_args.kwargs["tempo_limite"], servico_ia.TEMPO_TOTAL_SEGUNDOS - 30)
+
     # Se só a correção falhar, o que já estava certo continua no rascunho.
     def test_falha_na_correcao_mantem_a_primeira_resposta(self):
         primeira = [{"cesta_id": 1, "produto": "Alface", "quantidade": 3},
@@ -967,6 +985,22 @@ class TestesPrePreenchimento(unittest.TestCase):
                 with patch.object(servico_ia.genai, "Client", return_value=cliente):
                     with self.assertRaises(IaIndisponivel):
                         servico_ia.chamar_modelo("pedido")
+
+    # Se o primeiro modelo falhar, o seguinte da lista é tentado, e a resposta dele vale.
+    def test_modelo_sobrecarregado_passa_para_o_seguinte(self):
+        cliente = Mock()
+        cliente.interactions.create.side_effect = [
+            Mock(output_text='nao e json'),
+            Mock(output_text='{"itens": [{"cesta_id": 1, "produto": "Alface", "quantidade": 2}]}')]
+        with patch.object(servico_ia, "CHAVE_DA_IA", "chave-falsa"):
+            with patch.object(servico_ia, "MODELOS_DA_IA", ["modelo-a", "modelo-b"]):
+                with patch.object(servico_ia.genai, "Client", return_value=cliente):
+                    itens = servico_ia.chamar_modelo("pedido")
+        self.assertEqual(itens, [{"cesta_id": 1, "produto": "Alface", "quantidade": 2}])
+        usados = [chamada.kwargs["model"] for chamada in cliente.interactions.create.call_args_list]
+        self.assertEqual(usados, ["modelo-a", "modelo-b"])
+        self.assertTrue(all(c.kwargs["timeout"] <= servico_ia.TEMPO_POR_MODELO
+                            for c in cliente.interactions.create.call_args_list))
 
     # A confirmação trava a semana antes de ler e grava num commit só.
     def test_confirmacao_trava_e_grava_uma_vez(self):
