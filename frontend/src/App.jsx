@@ -290,13 +290,30 @@ function Cabecalho({ usuario, aoSair, navegar, telaAtual }) {
 
 // Componente de Login conforme o slide 35 da Aula 08
 function Login({ aoEntrar }) {
-  const [modo, setModo] = useState('login'); // 'login' ou 'cadastro'
+  const [modo, setModo] = useState('login'); // 'login', 'cadastro' ou 'suporte'
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [nome, setNome] = useState('');
-  const [tipo, setTipo] = useState('assinante');
+  const [codigoSuporte, setCodigoSuporte] = useState('');
   const [mensagem, setMensagem] = useState('');
   const [carregando, setCarregando] = useState(false);
+  // O modo suporte: 5 cliques no logo em até 3 segundos mostram a aba de cadastro de produtor.
+  // Os cliques só escondem o formulário; quem protege é o código de suporte, conferido no back.
+  const [suporteAtivo, setSuporteAtivo] = useState(false);
+  const cliquesNoLogo = useRef([]);
+
+  const clicarNoLogo = () => {
+    const agora = Date.now();
+    cliquesNoLogo.current = [...cliquesNoLogo.current.filter((momento) => agora - momento < 3000), agora];
+    if (cliquesNoLogo.current.length >= 5) {
+      cliquesNoLogo.current = [];
+      setSuporteAtivo(true);
+      setModo('suporte');
+      setMensagem('');
+    }
+  };
+
+  const trocarModo = (novo) => { setModo(novo); setMensagem(''); };
 
   // Mão na massa 2.6 (Slide 35): o /login lê URLSearchParams com username e password
   const submeterLogin = (e) => {
@@ -317,16 +334,20 @@ function Login({ aoEntrar }) {
       .finally(() => setCarregando(false));
   };
 
+  // O cadastro público cria sempre uma assinante: o perfil não é enviado, e o back recusa quem o mandar.
+  // No modo suporte, o mesmo formulário vai para /usuarios/produtor, com o código de suporte.
   const submeterCadastro = (e) => {
     e.preventDefault();
     setMensagem('');
     setCarregando(true);
-    fetch(`${URL_DA_API}/usuarios`, {
+    const produtor = modo === 'suporte';
+    fetch(`${URL_DA_API}/usuarios${produtor ? '/produtor' : ''}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nome, tipo, email, senha })
+      body: JSON.stringify(produtor ? { nome, email, senha, codigo_suporte: codigoSuporte } : { nome, email, senha })
     })
       .then((resposta) => {
+        if (resposta.status === 403) throw new Error('Código de suporte inválido.');
         if (resposta.status === 409) throw new Error('Já existe um usuário com esse e-mail');
         if (!resposta.ok) throw new Error('Erro ao cadastrar. Confira os campos digitados.');
         return resposta.json();
@@ -351,11 +372,14 @@ function Login({ aoEntrar }) {
   return <div className="auth-wrap">
     <div className="auth-card">
       <div className="auth-header">
-        <span className="auth-logo">
-          <img src="/marca/logo_cesta_do_vale_em_estilo_cartum.png" alt="Cesta do Vale" width="240" height="79" />
+        {/* O clique no logo não é um botão de propósito: ele não aparece no foco do teclado nem no leitor de tela */}
+        <span className="auth-logo" onClick={clicarNoLogo}>
+          <img src="/marca/logo_cesta_do_vale_em_estilo_cartum.png" alt="Cesta do Vale" width="240" height="79" draggable="false" />
         </span>
-        <h1>{modo === 'login' ? 'Entrar no sistema' : 'Criar nova conta'}</h1>
-        <p>{modo === 'login' ? 'Digite suas credenciais para acessar sua área.' : 'Cadastre-se como assinante ou produtor da horta.'}</p>
+        <h1>{modo === 'login' ? 'Entrar no sistema' : modo === 'suporte' ? 'Cadastro de produtor' : 'Criar nova conta'}</h1>
+        <p>{modo === 'login' ? 'Digite suas credenciais para acessar sua área.'
+          : modo === 'suporte' ? 'Modo suporte: a conta nasce com o perfil de produtor.'
+            : 'Cadastre-se para pedir a cesta da semana.'}</p>
       </div>
 
       {/* role="tab" e aria-selected dizem ao leitor de tela qual das duas abas está aberta */}
@@ -365,7 +389,7 @@ function Login({ aoEntrar }) {
           role="tab"
           aria-selected={modo === 'login'}
           className={`auth-tab ${modo === 'login' ? 'active' : ''}`}
-          onClick={() => { setModo('login'); setMensagem(''); }}
+          onClick={() => trocarModo('login')}
         >
           Já tenho conta
         </button>
@@ -374,10 +398,21 @@ function Login({ aoEntrar }) {
           role="tab"
           aria-selected={modo === 'cadastro'}
           className={`auth-tab ${modo === 'cadastro' ? 'active' : ''}`}
-          onClick={() => { setModo('cadastro'); setMensagem(''); }}
+          onClick={() => trocarModo('cadastro')}
         >
           Cadastrar
         </button>
+        {suporteAtivo && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={modo === 'suporte'}
+            className={`auth-tab ${modo === 'suporte' ? 'active' : ''}`}
+            onClick={() => trocarModo('suporte')}
+          >
+            Produtor
+          </button>
+        )}
       </div>
 
       {mensagem && <div className="auth-error" role="alert">{mensagem}</div>}
@@ -419,17 +454,10 @@ function Login({ aoEntrar }) {
               required
               minLength={2}
               maxLength={100}
-              placeholder="Ex.: Aline Silva"
+              autoComplete="name"
               value={nome}
               onChange={(e) => setNome(e.target.value)}
             />
-          </label>
-          <label>
-            Perfil na horta
-            <select value={tipo} onChange={(e) => setTipo(e.target.value)}>
-              <option value="assinante">Aline · Assinante (pede as cestas)</option>
-              <option value="produtor">Vanderlei · Produtor (separa os produtos)</option>
-            </select>
           </label>
           <label>
             E-mail
@@ -453,8 +481,21 @@ function Login({ aoEntrar }) {
               onChange={(e) => setSenha(e.target.value)}
             />
           </label>
+          {modo === 'suporte' && (
+            <label>
+              Código de suporte
+              <input
+                type="password"
+                required
+                maxLength={200}
+                autoComplete="off"
+                value={codigoSuporte}
+                onChange={(e) => setCodigoSuporte(e.target.value)}
+              />
+            </label>
+          )}
           <button className="btn btn-primary" type="submit" disabled={carregando}>
-            {carregando ? 'Cadastrando...' : 'Criar conta e entrar'} <Icone nome="check" />
+            {carregando ? 'Cadastrando...' : modo === 'suporte' ? 'Criar produtor e entrar' : 'Criar conta e entrar'} <Icone nome="check" />
           </button>
         </form>
       )}
@@ -462,7 +503,7 @@ function Login({ aoEntrar }) {
   </div>;
 }
 
-// Tela de Minhas Cestas da Assinante (Aline)
+// Tela de Minhas Cestas da assinante
 function MinhasCestas({ token, navegar, abrirPedido, aoExpirar, versao }) {
   const [cestas, setCestas] = useState([]);
   const [carregando, setCarregando] = useState(true);
@@ -565,7 +606,7 @@ function MinhasCestas({ token, navegar, abrirPedido, aoExpirar, versao }) {
   </section>;
 }
 
-// Tela de Separação do Produtor (Vanderlei)
+// Tela de Separação do produtor
 // A frase padrão quando a IA falha. Um erro do servidor do Vercel nem sempre vem em JSON, então fica aqui também.
 const FALHA_DA_IA = 'Não foi possível gerar a sugestão. Você pode separar manualmente.';
 
@@ -1636,7 +1677,7 @@ export default function App() {
         <span className="section-overline">SEU PEDIDO</span>
         <h2 id="titulo-pedido">Confirmar cesta</h2>
         <p>Escolha o tamanho e confira os detalhes antes de pedir sua cesta semanal.</p>
-        {/* Tela 1 da cartilha: a Aline escolhe o tamanho. Os radio de mesmo name formam um grupo
+        {/* Tela 1 da cartilha: a assinante escolhe o tamanho. Os radio de mesmo name formam um grupo
             em que só um fica marcado; trocar a opção atualiza o tamanhoPedido e o resumo abaixo */}
         {/* O pedido não depende do estoque: o produtor aprova ou recusa depois */}
         <fieldset className="size-picker">

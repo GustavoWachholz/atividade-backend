@@ -6,11 +6,11 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 TipoUsuario = Literal["assinante", "produtor"]
 
 
-# Literal limita os valores aceitos; campos extras são recusados na entrada.
+# O cadastro público cria só assinantes: o tipo não faz parte da entrada.
+# extra="forbid" recusa com 422 quem tentar mandar "tipo": "produtor" no corpo.
 class UsuarioCriacao(BaseModel):
     model_config = ConfigDict(extra="forbid")
     nome: str = Field(min_length=2, max_length=100)
-    tipo: TipoUsuario
     email: EmailStr = Field(max_length=100)
     senha: str = Field(min_length=8, max_length=72, repr=False)
 
@@ -24,6 +24,12 @@ class UsuarioCriacao(BaseModel):
     @classmethod
     def normalizar_email(cls, valor):
         return str(valor).lower()
+
+
+# O cadastro de produtor do modo suporte: os mesmos campos, mais o código conferido no back.
+# repr=False tira o código dos logs e das mensagens de erro do Pydantic.
+class ProdutorCriacao(UsuarioCriacao):
+    codigo_suporte: str = Field(min_length=1, max_length=200, repr=False)
 
 
 # from_attributes permite construir a resposta a partir de um modelo SQLAlchemy.

@@ -176,3 +176,5 @@ dialog{border:1px solid #dce6d4;border-radius:22px;padding:30px 33px 31px;width:
 .catalog-rename input{border:1px solid var(--border-default);border-radius:var(--radius-field);padding:8px 10px;font-size:14px;min-height:44px;flex:1 1 140px;min-width:0}
 .catalog-inactive td:first-child{color:var(--text-secondary)}
 @media (max-width:680px){.catalog-table th:nth-child(2),.catalog-table td:nth-child(2){display:none}.catalog-actions{white-space:normal}}
+/* Modo suporte: os cliques seguidos no logo não selecionam a imagem nem mostram cursor de link */
+.auth-logo{user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent}

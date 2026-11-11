@@ -5,6 +5,10 @@ class EmailEmUso(Exception):
     """O endereço de e-mail informado já pertence a um usuário."""
 
 
+class CodigoDeSuporteInvalido(Exception):
+    """O código do modo suporte está errado, ou o modo suporte está desligado (variável vazia)."""
+
+
 class LimiteDaCestaExcedido(Exception):
     """O produto separado faria a soma das quantidades passar do limite do tamanho da cesta."""
 

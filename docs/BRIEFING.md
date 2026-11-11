@@ -4,12 +4,12 @@
 
 - **Cartilha e nome da solução:** 3 — Cesta do Vale, horta comunitária.
 - **Negócio:** horta comunitária que vende cestas semanais.
-- **Pessoas atendidas:** Aline, assinante que usa principalmente o celular, e Vanderlei, produtor que usa principalmente o computador.
+- **Pessoas atendidas:** a assinante, que usa principalmente o celular, e o produtor, que usa principalmente o computador.
 - **Regra central:** cada tamanho de cesta comporta uma quantidade máxima de itens; o produtor não pode separar além desse limite.
 
 ## Problema
 
-Hoje os pedidos chegam por um grupo de mensagens. Assim, Aline não tem uma forma simples de acompanhar o pedido e saber o que foi separado, enquanto Vanderlei monta as cestas sem uma visão clara do conteúdo e da capacidade restante de cada uma.
+Hoje os pedidos chegam por um grupo de mensagens. Assim, a assinante não tem uma forma simples de acompanhar o pedido e saber o que foi separado, enquanto o produtor monta as cestas sem uma visão clara do conteúdo e da capacidade restante de cada uma.
 
 ## Objetivo da solução
 
@@ -19,8 +19,8 @@ As experiências da assinante e do produtor têm a mesma prioridade: ambas preci
 
 ## Públicos e necessidades
 
-- **Aline — assinante:** tem pouco tempo e quer pedir a cesta da semana em cerca de dois minutos, inclusive durante um trajeto de ônibus. Precisa escolher o tamanho, ver suas cestas e situações e consultar os produtos separados para planejar as refeições.
-- **Vanderlei — produtor:** separa as cestas na quinta-feira. Precisa filtrar as cestas por tamanho, abrir cada uma, registrar os produtos e suas quantidades e conferir quantos itens ainda cabem.
+- **Assinante:** tem pouco tempo e quer pedir a cesta da semana em cerca de dois minutos, inclusive durante um trajeto de ônibus. Precisa escolher o tamanho, ver suas cestas e situações e consultar os produtos separados para planejar as refeições.
+- **Produtor:** separa as cestas na quinta-feira. Precisa filtrar as cestas por tamanho, abrir cada uma, registrar os produtos e suas quantidades e conferir quantos itens ainda cabem.
 
 ## Funcionalidades iniciais
 
