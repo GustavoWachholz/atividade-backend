@@ -284,8 +284,16 @@
 - Por quê: pedido do autor.
 - Ficou de fora: o `docs/planejamento-ia-aula-10.pdf`, que é um arquivo entregue e não foi editado.
 
-## O produtor entra pelo modo suporte, com um código no `.env`
+## O produtor entra pelo modo suporte, com um código no `.env` (substituída)
+- Substituída em 2026-11-10 por "O produtor é ativado por um código enviado ao administrador", abaixo.
 - Decisão: `POST /usuarios/produtor` cria um produtor quando o `codigo_suporte` do corpo bate com o `CODIGO_DE_SUPORTE` do `.env`. Com a variável vazia, a rota recusa sempre (403). A comparação usa `hmac.compare_digest`, e o log registra só o resultado, sem o código nem o e-mail. A rota fica fora do `/docs` (`include_in_schema=False`). No front, 5 cliques no logo do login em até 3 segundos mostram a aba **Produtor**, com o campo do código.
 - Por quê: o cadastro público não pode criar produtor, e o primeiro produtor precisava de um caminho sem mexer no banco. Os cliques só escondem o formulário, porque o código do front é público; quem protege é o código conferido no back. Com 32 caracteres aleatórios, adivinhar é impraticável mesmo sem limite de tentativas.
 - Ficou de fora: limite de tentativas (difícil de manter nas funções do Vercel), códigos de uso único com validade (convites) e um terceiro perfil de administrador.
 - Onde está: `configuracao.py`, `esquemas/usuario.py` (`ProdutorCriacao`), `servicos/usuario.cadastrar_produtor`, `rotas/usuarios.py`, `Login` em `frontend/src/App.jsx`.
+
+## O produtor é ativado por um código enviado ao administrador (substitui o código fixo)
+- Decisão: a aba **Produtor** (5 cliques no logo) pede o cadastro em `POST /usuarios/produtor/solicitacoes`. O back grava um pedido em `solicitacoes_produtor`, gera um código de 6 dígitos (`secrets.randbelow`) e o envia pelo Resend ao `EMAIL_DO_ADMIN`, com o nome e o e-mail de quem pediu. O produtor só é criado em `.../{id}/confirmar`, com o código certo. O código vale 30 minutos, aceita 5 tentativas (na 5ª o pedido é cancelado) e serve uma vez só. Pedir de novo com o mesmo e-mail substitui o pedido anterior, e no máximo 3 pedidos esperam ao mesmo tempo (429).
+- Por quê: o código fixo valia para sempre e para qualquer um que o soubesse. O código por e-mail é novo a cada pedido, e o administrador vê quem pediu antes de passar o código.
+- Segurança: o banco guarda só o hash da senha e o do código (Argon2); o log não registra o código nem o e-mail; o `id` do pedido é um texto aleatório (`secrets.token_urlsafe`); a confirmação trava o pedido (`with_for_update`), e criar o produtor e apagar o pedido acontecem no mesmo commit. Se o e-mail não sair, o pedido é desfeito (503). O e-mail do administrador fica só nas variáveis, porque o repositório é público.
+- Ficou de fora: limite por IP, reenviar o mesmo código, painel de pedidos para o administrador e confirmar o e-mail de quem pede.
+- Onde está: `modelos/solicitacao_produtor.py`, migration `0003_solicitacoes_produtor`, `repositorios/solicitacao_produtor.py`, `servicos/email.py`, `servicos/usuario.py` (`solicitar_produtor`, `confirmar_produtor`), `rotas/usuarios.py`, `Login` em `frontend/src/App.jsx`. O plano está em `.docs/plano-ativacao-produtor.md`.

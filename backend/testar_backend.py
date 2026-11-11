@@ -38,6 +38,9 @@ from servicos import cesta as servico_cesta
 from servicos import produto_separado as servico_produto
 from servicos import estoque as servico_estoque
 from servicos import produto as servico_catalogo
+from servicos import email as servico_email
+from servicos.excecoes import EmailIndisponivel
+from modelos.solicitacao_produtor import SolicitacaoProdutor
 from servicos import pre_preenchimento as servico_ia
 from servicos.excecoes import ConfirmacaoRecusada, IaIndisponivel, NadaParaPreencher
 from esquemas.pre_preenchimento import ConfirmacaoDoRascunho
@@ -169,30 +172,91 @@ class TestesBackend(unittest.TestCase):
         # A lista pública de usuários foi retirada: ela expunha o e-mail de todo mundo.
         self.assertEqual(self.cliente.get("/usuarios").status_code, 405)
 
-    # O modo suporte cria produtor só com o código certo; desligado ou com código errado, recusa com 403.
-    def test_modo_suporte_cadastra_produtor(self):
-        dados = {"nome": "Produtor", "email": "produtor.novo@example.com", "senha": "teste1234"}
-        url = "/usuarios/produtor"
-        with patch.object(configuracao, "CODIGO_DE_SUPORTE", ""):
-            desligado = self.cliente.post(url, json={**dados, "codigo_suporte": ""})
-            self.assertEqual(desligado.status_code, 422)  # código vazio nem chega ao serviço
-            self.assertEqual(self.cliente.post(url, json={**dados, "codigo_suporte": "qualquer"}).status_code, 403)
-        with patch.object(configuracao, "CODIGO_DE_SUPORTE", "codigo-certo-de-teste"):
-            errado = self.cliente.post(url, json={**dados, "codigo_suporte": "codigo-errado"})
-            self.assertEqual((errado.status_code, errado.json()["detail"]), (403, "Código de suporte inválido."))
-            self.assertEqual(self.cliente.post(url, json=dados).status_code, 422)
-            self.assertEqual(self.cliente.post(url, json={
-                **dados, "codigo_suporte": "codigo-certo-de-teste", "tipo": "assinante"}).status_code, 422)
-            with self.Sessao() as sessao:
-                self.assertEqual(sessao.query(Usuario).count(), 0)
-            certo = self.cliente.post(url, json={**dados, "codigo_suporte": "codigo-certo-de-teste"})
-            self.assertEqual(certo.status_code, 201)
-            self.assertEqual(certo.json()["tipo"], "produtor")
-            self.assertNotIn("codigo_suporte", certo.json())
-            repetido = self.cliente.post(url, json={**dados, "codigo_suporte": "codigo-certo-de-teste"})
-            self.assertEqual(repetido.status_code, 409)
-        # A rota fica fora do /docs.
-        self.assertNotIn(url, self.cliente.get("/openapi.json").json()["paths"])
+    # Pede o cadastro de produtor com o envio de e-mail falso, e devolve a resposta e o código "enviado".
+    def pedir_produtor(self, email="produtor.novo@example.com"):
+        with patch.object(servico_email, "enviar_codigo_ao_admin") as enviar:
+            resposta = self.cliente.post("/usuarios/produtor/solicitacoes", json={
+                "nome": "Produtor", "email": email, "senha": "teste1234"})
+        codigo = enviar.call_args.args[2] if enviar.called else None
+        return resposta, codigo
+
+    def confirmar(self, solicitacao_id, codigo):
+        return self.cliente.post(f"/usuarios/produtor/solicitacoes/{solicitacao_id}/confirmar", json={"codigo": codigo})
+
+    @staticmethod
+    def outro_codigo(codigo):
+        return f"{(int(codigo) + 1) % 10 ** 6:06d}"
+
+    # O pedido não cria usuário; o código certo cria o produtor, entra no login e não vale uma segunda vez.
+    def test_ativacao_do_produtor(self):
+        pedido, codigo = self.pedir_produtor()
+        self.assertEqual(pedido.status_code, 202)
+        self.assertRegex(codigo, r"^\d{6}$")
+        self.assertEqual(pedido.json()["tentativas"], 5)
+        with self.Sessao() as sessao:
+            self.assertEqual(sessao.query(Usuario).count(), 0)
+            solicitacao = sessao.get(SolicitacaoProdutor, pedido.json()["id"])
+            # O banco guarda só os hashes: nem o código nem a senha em texto.
+            self.assertNotIn(codigo, solicitacao.codigo_hash)
+            self.assertTrue(solicitacao.senha_hash.startswith("$argon2id$"))
+        errado = self.confirmar(pedido.json()["id"], self.outro_codigo(codigo))
+        self.assertEqual((errado.status_code, errado.json()["detail"]), (403, "Código incorreto. Restam 4 tentativas."))
+        for invalido in ["12345", "abcdef", "1234567"]:
+            self.assertEqual(self.confirmar(pedido.json()["id"], invalido).status_code, 422)
+        certo = self.confirmar(pedido.json()["id"], codigo)
+        self.assertEqual((certo.status_code, certo.json()["tipo"]), (201, "produtor"))
+        login = self.cliente.post("/login", data={"username": "produtor.novo@example.com", "password": "teste1234"})
+        self.assertEqual(login.status_code, 200)
+        self.assertEqual(self.confirmar(pedido.json()["id"], codigo).status_code, 404)
+        # E-mail que já tem conta não pede de novo. As rotas ficam fora do /docs.
+        self.assertEqual(self.pedir_produtor()[0].status_code, 409)
+        caminhos = self.cliente.get("/openapi.json").json()["paths"]
+        self.assertFalse([caminho for caminho in caminhos if caminho.startswith("/usuarios/produtor")])
+
+    # Na 5ª tentativa errada o pedido é cancelado, e nem o código certo vale mais.
+    def test_ativacao_cancela_depois_de_cinco_erros(self):
+        pedido, codigo = self.pedir_produtor()
+        for restantes in [4, 3, 2, 1]:
+            self.assertEqual(self.confirmar(pedido.json()["id"], self.outro_codigo(codigo)).status_code, 403, restantes)
+        ultima = self.confirmar(pedido.json()["id"], self.outro_codigo(codigo))
+        self.assertIn("O pedido foi cancelado", ultima.json()["detail"])
+        self.assertEqual(self.confirmar(pedido.json()["id"], codigo).status_code, 404)
+
+    # Código vencido responde 410 e apaga o pedido.
+    def test_ativacao_vencida(self):
+        pedido, codigo = self.pedir_produtor()
+        with self.Sessao() as sessao:
+            solicitacao = sessao.get(SolicitacaoProdutor, pedido.json()["id"])
+            solicitacao.expira_em = datetime(2026, 1, 1)
+            sessao.commit()
+        self.assertEqual(self.confirmar(pedido.json()["id"], codigo).status_code, 410)
+        with self.Sessao() as sessao:
+            self.assertEqual(sessao.query(SolicitacaoProdutor).count(), 0)
+
+    # Se o e-mail não sair, o pedido não fica gravado. Sem a configuração do e-mail, a rota responde 503.
+    def test_ativacao_sem_email_nao_grava(self):
+        with patch.object(servico_email, "enviar_codigo_ao_admin", side_effect=EmailIndisponivel("fora do ar")):
+            resposta = self.cliente.post("/usuarios/produtor/solicitacoes", json={
+                "nome": "Produtor", "email": "produtor.novo@example.com", "senha": "teste1234"})
+        self.assertEqual(resposta.status_code, 503)
+        with patch.object(configuracao, "CHAVE_DO_EMAIL", ""), patch.object(servico_email.httpx, "post") as post:
+            desligado = self.cliente.post("/usuarios/produtor/solicitacoes", json={
+                "nome": "Produtor", "email": "produtor.novo@example.com", "senha": "teste1234"})
+            post.assert_not_called()
+        self.assertEqual(desligado.status_code, 503)
+        with self.Sessao() as sessao:
+            self.assertEqual(sessao.query(SolicitacaoProdutor).count(), 0)
+
+    # No máximo 3 pedidos esperam ao mesmo tempo. Pedir de novo com o mesmo e-mail substitui o pedido anterior.
+    def test_ativacao_limita_os_pedidos(self):
+        primeiro, codigo_antigo = self.pedir_produtor("um@example.com")
+        segundo, _ = self.pedir_produtor("um@example.com")
+        self.assertEqual(segundo.status_code, 202)
+        self.assertEqual(self.confirmar(primeiro.json()["id"], codigo_antigo).status_code, 404)
+        self.assertEqual(self.pedir_produtor("dois@example.com")[0].status_code, 202)
+        self.assertEqual(self.pedir_produtor("tres@example.com")[0].status_code, 202)
+        excesso, codigo = self.pedir_produtor("quatro@example.com")
+        self.assertEqual((excesso.status_code, codigo), (429, None))
 
     def test_email_unico_e_senha_em_hash(self):
         dados = {"nome": "Ana", "email": "ANA@example.com", "senha": "teste1234"}
@@ -1172,6 +1236,34 @@ class TestesRotasDoPrePreenchimento(unittest.TestCase):
                 self.assertEqual(self.cliente.post("/cestas/pre-preenchimento/confirmar",
                                                    json=corpo).status_code, 422)
         confirmar.assert_not_called()
+
+
+# O envio do código ao administrador, sem chamar a internet.
+class TestesEmail(unittest.TestCase):
+    def setUp(self):
+        for nome, valor in [("CHAVE_DO_EMAIL", "chave-falsa"), ("EMAIL_DO_ADMIN", "admin@example.com")]:
+            patcher = patch.object(configuracao, nome, valor)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    # O e-mail vai só para o administrador, com o código, quem pediu e o prazo em horário de Brasília.
+    def test_codigo_vai_para_o_admin(self):
+        with patch.object(servico_email.httpx, "post") as post:
+            servico_email.enviar_codigo_ao_admin("Produtor", "pediu@example.com", "123456", datetime(2026, 11, 10, 15, 30))
+        corpo = post.call_args.kwargs["json"]
+        self.assertEqual(corpo["to"], ["admin@example.com"])
+        self.assertIn("123456", corpo["text"])
+        self.assertIn("pediu@example.com", corpo["text"])
+        self.assertIn("12:30", corpo["text"])
+        self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer chave-falsa")
+
+    # Falha do serviço de e-mail vira EmailIndisponivel, e não erro 500.
+    def test_falha_do_servico_vira_indisponivel(self):
+        import httpx
+        for erro in [httpx.ConnectTimeout("lento"), httpx.HTTPStatusError("401", request=Mock(), response=Mock())]:
+            with patch.object(servico_email.httpx, "post", side_effect=erro):
+                with self.assertRaises(EmailIndisponivel):
+                    servico_email.enviar_codigo_ao_admin("Produtor", "pediu@example.com", "123456", datetime(2026, 11, 10))
 
 
 # unittest executa os cenários sem exigir uma biblioteca adicional de testes.

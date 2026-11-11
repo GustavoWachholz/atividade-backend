@@ -26,10 +26,18 @@ class UsuarioCriacao(BaseModel):
         return str(valor).lower()
 
 
-# O cadastro de produtor do modo suporte: os mesmos campos, mais o código conferido no back.
-# repr=False tira o código dos logs e das mensagens de erro do Pydantic.
-class ProdutorCriacao(UsuarioCriacao):
-    codigo_suporte: str = Field(min_length=1, max_length=200, repr=False)
+# O pedido de cadastro de produtor usa os mesmos campos do cadastro (nome, e-mail e senha).
+# A resposta traz o id do pedido, o prazo do código e quantas tentativas ele aceita.
+class SolicitacaoProdutorResposta(BaseModel):
+    id: str
+    expira_em: datetime
+    tentativas: int
+
+
+# O código que o administrador recebeu: exatamente 6 dígitos. repr=False tira o código dos logs.
+class CodigoDeAtivacao(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    codigo: str = Field(pattern=r"^\d{6}$", repr=False)
 
 
 # from_attributes permite construir a resposta a partir de um modelo SQLAlchemy.

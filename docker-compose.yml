@@ -6,7 +6,8 @@ services:
       URL_DO_BANCO: ${URL_DO_BANCO}
       CHAVE_DO_TOKEN: ${CHAVE_DO_TOKEN}
       CHAVE_DA_IA: ${CHAVE_DA_IA:-}
-      CODIGO_DE_SUPORTE: ${CODIGO_DE_SUPORTE:-}
+      EMAIL_DO_ADMIN: ${EMAIL_DO_ADMIN:-}
+      CHAVE_DO_EMAIL: ${CHAVE_DO_EMAIL:-}
       ORIGEM_FRONTEND: http://localhost:8080
 
   web:

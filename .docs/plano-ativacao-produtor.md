@@ -67,6 +67,11 @@ depois de digitar o código que o administrador recebeu.
 2. Coloca `CHAVE_DO_EMAIL` e `EMAIL_DO_ADMIN` no `backend/.env` e nas variáveis do projeto do back no Vercel.
 3. Aplica a migration `0003` no Supabase (`alembic upgrade head`).
 
+## Situação (2026-11-10)
+Etapas 1 a 4 feitas no branch `cadastro-de-produtor`. Os testes passam com SQLite e o envio de e-mail falso, e o
+fluxo foi testado no navegador com a API local. Falta: a conta no Resend, as variáveis no Vercel, a migration
+`0003` no Supabase e o primeiro envio de verdade.
+
 ## Fora deste plano
 Limite de tentativas por IP, reenvio do mesmo código, painel para o administrador ver as solicitações e
 confirmação do e-mail de quem pediu.

@@ -11,9 +11,13 @@ URL_DO_BANCO_TESTE = os.getenv("URL_DO_BANCO_TESTE")
 ORIGEM_FRONTEND = os.getenv("ORIGEM_FRONTEND", "http://localhost:5173")
 # A chave é opcional: sem ela a API sobe normalmente, e só o pré-preenchimento fica indisponível.
 CHAVE_DA_IA = os.getenv("CHAVE_DA_IA")
-# O código do modo suporte, que libera o cadastro de produtor. Vazio, a rota fica desligada.
-# Gere com: python -c "import secrets; print(secrets.token_urlsafe(32))"
-CODIGO_DE_SUPORTE = os.getenv("CODIGO_DE_SUPORTE", "").strip()
+# O cadastro de produtor manda um código de ativação ao e-mail do administrador, pelo Resend.
+# Sem a chave ou sem o e-mail, o cadastro de produtor fica desligado (503). O e-mail do administrador
+# fica só aqui no .env e no Vercel, nunca no código, porque o repositório é público.
+EMAIL_DO_ADMIN = os.getenv("EMAIL_DO_ADMIN", "").strip()
+CHAVE_DO_EMAIL = os.getenv("CHAVE_DO_EMAIL", "").strip()
+# Sem domínio próprio, o Resend envia só deste remetente, e só para o e-mail dono da conta.
+REMETENTE_DO_EMAIL = os.getenv("REMETENTE_DO_EMAIL", "").strip() or "Cesta do Vale <onboarding@resend.dev>"
 # Os modelos tentados em ordem, separados por vírgula. Os Flash-Lite responderam em 3 a 24 s nos testes;
 # o 3.8 Flash passou de 50 s e estourava o tempo. Se um estiver sobrecarregado, o seguinte é tentado.
 MODELOS_DA_IA = [modelo.strip() for modelo in

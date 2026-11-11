@@ -2,8 +2,9 @@
 
 1. **Testar a IA com uma chave real** (ver `ia.md`). Crie a chave no Google AI Studio, coloque `CHAVE_DA_IA` no
    `backend/.env` e no projeto do Vercel, e confira a qualidade da sugestão. Depois, publique e teste o `maxDuration`.
-2. **Ligar o modo suporte e criar o primeiro produtor.** Gere o `CODIGO_DE_SUPORTE`, coloque no `backend/.env` e nas
-   variáveis do projeto do back no Vercel, publique e cadastre o produtor pelos 5 cliques no logo do login.
+2. **Ligar a ativação do produtor e criar o primeiro.** Crie a conta no Resend, coloque `EMAIL_DO_ADMIN` e
+   `CHAVE_DO_EMAIL` no `backend/.env` e no Vercel, rode `alembic upgrade head` no Supabase (migration `0003`), publique
+   e cadastre o produtor pelos 5 cliques no logo do login. O envio real pelo Resend ainda não foi testado.
 3. **Testar o fluxo do pedido de ponta a ponta** (back e front prontos; o build do front compila, mas as telas não
    foram abertas no navegador). Roteiro: assinante pede sem estoque, produtor aprova, cadastra a colheita, separa até
    encher e conclui; outro pedido é reprovado.

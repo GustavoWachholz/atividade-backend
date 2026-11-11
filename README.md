@@ -76,14 +76,16 @@ O front abre em `http://localhost:5173`. O back precisa estar rodando.
 Um banco novo não tem usuários. O cadastro (`POST /usuarios` no `/docs`, ou a aba **Cadastrar** do front) cria
 sempre uma **assinante**: o corpo leva só `nome`, `email` e `senha`, e quem mandar `tipo` recebe 422.
 
-Não há cadastro público de produtor. O produtor entra pelo **modo suporte**:
+Não há cadastro público de produtor. O produtor é ativado por um código enviado ao e-mail do administrador:
 
-1. Gere um código com `python -c "import secrets; print(secrets.token_urlsafe(32))"` e coloque em `CODIGO_DE_SUPORTE`,
-   no `backend/.env` e nas variáveis do projeto do back no Vercel. Vazia, a rota fica desligada.
-2. Na tela de login, clique **5 vezes no logo** em até 3 segundos. Aparece a aba **Produtor**.
-3. Preencha nome, e-mail, senha e o código de suporte. A conta nasce produtor e já entra.
-
-Depois de cadastrar, você pode apagar ou trocar o `CODIGO_DE_SUPORTE` para desligar o modo suporte.
+1. Crie uma conta no [Resend](https://resend.com) com o e-mail do administrador e gere uma chave de API. Sem domínio
+   próprio, o Resend só envia para o e-mail dono da conta, que é o do administrador.
+2. Coloque `EMAIL_DO_ADMIN` e `CHAVE_DO_EMAIL` no `backend/.env` e nas variáveis do projeto do back no Vercel.
+   Sem as duas, o cadastro de produtor responde 503. O e-mail fica só nas variáveis, nunca no código.
+3. Na tela de login, clique **5 vezes no logo** em até 3 segundos. Aparece a aba **Produtor**.
+4. Preencha nome, e-mail e senha e clique em **Solicitar cadastro**. O administrador recebe um código de 6 dígitos,
+   que vale 30 minutos, aceita 5 tentativas e serve uma vez só.
+5. Digite o código na tela seguinte. A conta nasce produtor e já entra.
 
 Depois:
 
@@ -102,7 +104,8 @@ Sem ele, ou com o token inválido ou vencido (60 minutos), a resposta é **401**
 
 | Método | Caminho | O que faz | Quem pode | Sucesso | Recusas |
 | --- | --- | --- | --- | --- | --- |
-| POST | `/usuarios/produtor` | modo suporte: cadastra um produtor quando o `codigo_suporte` bate com o `CODIGO_DE_SUPORTE`. Fica fora do `/docs` | qualquer pessoa com o código | 201 | 403 código errado ou modo suporte desligado · 409 e-mail já cadastrado · 422 dados inválidos |
+| POST | `/usuarios/produtor/solicitacoes` | pede o cadastro de produtor e manda o código ao administrador. Fora do `/docs` | qualquer pessoa | 202 | 409 e-mail já cadastrado · 422 dados inválidos · 429 já há 3 pedidos esperando · 503 e-mail não configurado ou fora do ar |
+| POST | `/usuarios/produtor/solicitacoes/{id}/confirmar` | ativa o pedido com o código de 6 dígitos e cria o produtor. Fora do `/docs` | quem tem o código | 201 | 403 código errado (na 5ª, cancela) · 404 pedido inexistente ou já usado · 409 e-mail já cadastrado · 410 código vencido · 422 código fora do formato |
 | POST | `/usuarios` | cadastra uma assinante, com a senha em hash. Não aceita `tipo` | qualquer pessoa | 201 | 409 e-mail já cadastrado · 422 dados inválidos ou campo `tipo` enviado |
 | POST | `/login` | troca e-mail e senha por um token JWT | qualquer pessoa | 200 | 401 e-mail ou senha incorretos · 422 formulário incompleto |
 | GET | `/usuarios/eu` | mostra quem está logado | grupos com `conta:ver`: assinante e produtor | 200 | 401 · 403 sem permissão |

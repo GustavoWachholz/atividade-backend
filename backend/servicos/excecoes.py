@@ -5,8 +5,24 @@ class EmailEmUso(Exception):
     """O endereço de e-mail informado já pertence a um usuário."""
 
 
-class CodigoDeSuporteInvalido(Exception):
-    """O código do modo suporte está errado, ou o modo suporte está desligado (variável vazia)."""
+class EmailIndisponivel(Exception):
+    """O envio de e-mail não está configurado, ou o serviço de e-mail falhou."""
+
+
+class MuitasSolicitacoes(Exception):
+    """Já há o máximo de pedidos de cadastro de produtor esperando o código."""
+
+
+class SolicitacaoInexistente(Exception):
+    """O pedido de cadastro de produtor não existe, já foi usado ou foi cancelado."""
+
+
+class SolicitacaoVencida(Exception):
+    """O código de ativação passou do prazo."""
+
+
+class CodigoDeAtivacaoInvalido(Exception):
+    """O código de ativação não confere."""
 
 
 class LimiteDaCestaExcedido(Exception):
