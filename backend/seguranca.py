@@ -48,7 +48,7 @@ def ler_token(token: str):
 
 # ─── [NOVO · grupos] ─────────────────────────────────────────────────────────────────────
 # Assunto novo, fora das aulas: grupos de usuário com permissões.
-# Cada persona da cartilha é um GRUPO, e cada grupo tem um conjunto de PERMISSÕES.
+# Cada perfil de usuário é um GRUPO, e cada grupo tem um conjunto de PERMISSÕES.
 # Antes a rota perguntava "qual é o seu tipo?". Agora ela pergunta "o seu grupo tem esta permissão?".
 # Se um dia o produtor precisar de algo novo, muda só esta tabela, e não cada rota.
 # O nome do grupo é o valor da coluna `tipo` do usuário (assinante ou produtor),
@@ -69,12 +69,12 @@ def ler_token(token: str):
 #   catalogo:editar    POST e PATCH /produtos (cadastrar, renomear, desativar)
 # `{...}` com valores soltos é um set (conjunto): não repete itens e responde rápido ao `in`.
 GRUPOS = {
-    # Aline: pede a cesta e acompanha só as dela.
+    # A assinante pede a cesta e acompanha só as dela.
     # Ela também vê o estoque, para saber o que vem na semana, mas não cadastra.
     # Ela vê o catálogo, que vai servir para escolher o que quer ou não receber.
     "assinante": {"conta:ver", "cestas:pedir", "cestas:ver", "estoque:ver",
                   "catalogo:ver"},
-    # Vanderlei: vê todas as cestas, separa os produtos e cadastra a colheita.
+    # O produtor vê todas as cestas, separa os produtos e cadastra a colheita.
     "produtor": {"conta:ver", "cestas:ver", "cestas:ver_todas", "cestas:aprovar", "cestas:concluir",
                  "cestas:pre_preencher",
                  "produtos:separar", "estoque:cadastrar", "estoque:ver",

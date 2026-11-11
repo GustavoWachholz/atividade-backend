@@ -14,7 +14,7 @@ para estudar a responsabilidade de cada parte separadamente.
 | `esquemas/` | os esquemas Pydantic de entrada e de saída. A saída do usuário não tem senha nem hash | nada |
 | `modelos/` | os modelos SQLAlchemy: `Usuario`, `Cesta`, `ProdutoSeparado`, `Estoque` e `Produto` (o estoque e o catálogo vieram depois da cartilha) | `banco.Base` |
 | `seguranca.py` | `gerar_hash`, `verificar_senha`, `criar_token`, `ler_token`, e a tabela `GRUPOS` com `tem_permissao`. Não importa nada do FastAPI | `configuracao` |
-| `configuracao.py` | o único arquivo que lê o `.env` | nada |
+| `configuracao.py` | o único arquivo que lê o `.env`, inclusive o `EMAIL_DO_ADMIN` e a `CHAVE_DO_EMAIL` da ativação do produtor | nada |
 
 ## Como uma requisição atravessa as camadas
 

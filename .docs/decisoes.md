@@ -73,14 +73,14 @@
 - Onde está: `esquemas/cesta.py`, `servicos/cesta.py`.
 
 ## Grupos de usuário com permissões (assunto novo, marcado `# [NOVO · grupos]`)
-- Decisão: cada persona é um grupo, e a tabela `GRUPOS` liga o grupo às permissões (`conta:ver`, `cestas:pedir`, `cestas:ver`, `cestas:ver_todas`, `produtos:separar`). Toda rota protegida usa uma `exigir_<permissão>` (`exigir_ver_conta`, `exigir_pedir_cesta`, `exigir_ver_cestas`, `exigir_separar_produto`), que devolve 403. Elas substituem `exigir_assinante` e `exigir_produtor`.
+- Decisão: cada perfil é um grupo, e a tabela `GRUPOS` liga o grupo às permissões (`conta:ver`, `cestas:pedir`, `cestas:ver`, `cestas:ver_todas`, `produtos:separar`). Toda rota protegida usa uma `exigir_<permissão>` (`exigir_ver_conta`, `exigir_pedir_cesta`, `exigir_ver_cestas`, `exigir_separar_produto`), que devolve 403. Elas substituem `exigir_assinante` e `exigir_produtor`.
 - Por quê: a rota pergunta "o seu grupo pode?", e não "qual é o seu tipo?". Mudar o que um grupo faz é mexer só na tabela. Um grupo fora da tabela não pode nada (negar por padrão). 401 continua sendo para quem não provou quem é, e 403 para quem provou mas não pode.
 - Ficou de fora: tabelas `grupos` e `permissoes` no banco (o REGRAS veta tabela de papéis, e o DER teria que mudar), escopos do OAuth2, uma fábrica `exigir(permissao)` (função que devolve função) e usuário em mais de um grupo.
 - Onde está: `seguranca.py` (`GRUPOS`, `tem_permissao`), `rotas/autenticacao.py` (as `exigir_`), `rotas/cestas.py`, `servicos/cesta.listar`.
 
 ## A assinante só vê as próprias cestas
 - Decisão: quem não tem a permissão `cestas:ver_todas` (o grupo assinante) só vê as próprias cestas. Na lista, o serviço força o filtro pelo id, que não dá para escapar com `assinante_id`. No detalhe e nos produtos, `cesta_existente` devolve 404 e, depois disso, 403 para a cesta de outra pessoa.
-- Por quê: a cartilha diz que, com o login, a Aline vê só as cestas dela.
+- Por quê: a cartilha diz que, com o login, a assinante vê só as cestas dela.
 - Ficou de fora: esconder a existência da cesta com 404 no lugar do 403.
 - Onde está: `servicos/cesta.listar`, `rotas/cestas.cesta_existente`.
 
@@ -90,7 +90,8 @@
 - Ficou de fora: uma lista protegida para o produtor, porque nenhuma tela precisa dela.
 - Onde está: `rotas/usuarios.py`.
 
-## O cadastro deixa escolher o perfil
+## O cadastro deixa escolher o perfil (substituída)
+- Substituída em 2026-11-10 por "O cadastro público cria só assinantes", abaixo.
 - Decisão: `POST /usuarios` aceita `tipo` assinante ou produtor, inclusive pela tela de cadastro do front.
 - Por quê: a cartilha tem só dois perfis, e o teste precisa criar um de cada. O slide da aula 9 aceita isso no exemplo.
 - Ficou de fora: um administrador para atribuir o perfil de produtor, que seria o certo num sistema real. Ele exigiria um terceiro perfil, que a cartilha não tem.
@@ -271,3 +272,28 @@
 - Por quê: sem o `joined`, a lista da semana faria uma consulta por linha, cada uma uma ida ao Supabase. O Postgres não aceita `FOR UPDATE` no lado opcional de um `LEFT JOIN`, por isso o `innerjoin` (a `produto_id` nunca é nula); o `of=Estoque` trava só as linhas do estoque, e não os produtos do catálogo.
 - Ficou de fora: carregar o produto só quando a tela pede.
 - Onde está: `modelos/estoque.py`, `modelos/produto_separado.py`, `repositorios/estoque.py`.
+
+## O cadastro público cria só assinantes (substitui a escolha do perfil)
+- Decisão: o `UsuarioCriacao` não tem mais `tipo`, e o serviço grava sempre `assinante`. Com `extra="forbid"`, quem mandar `"tipo": "produtor"` recebe 422, e nada é gravado. A tela de cadastro perdeu o campo "Perfil na horta".
+- Por quê: qualquer pessoa virava produtor pela API publicada e via as cestas com o nome das assinantes.
+- Ficou de fora: o cadastro de produtor por essa rota. Ele entra pelo modo suporte (ver a decisão seguinte).
+- Onde está: `esquemas/usuario.py`, `servicos/usuario.cadastrar`, `rotas/usuarios.py`, `Login` em `frontend/src/App.jsx`.
+
+## Sem personas no projeto
+- Decisão: os textos, os comentários, os testes e os documentos falam em "assinante" e "produtor", sem nomes de personas e sem exemplos de nome nos campos.
+- Por quê: pedido do autor.
+- Ficou de fora: o `docs/planejamento-ia-aula-10.pdf`, que é um arquivo entregue e não foi editado.
+
+## O produtor entra pelo modo suporte, com um código no `.env` (substituída)
+- Substituída em 2026-11-10 por "O produtor é ativado por um código enviado ao administrador", abaixo.
+- Decisão: `POST /usuarios/produtor` cria um produtor quando o `codigo_suporte` do corpo bate com o `CODIGO_DE_SUPORTE` do `.env`. Com a variável vazia, a rota recusa sempre (403). A comparação usa `hmac.compare_digest`, e o log registra só o resultado, sem o código nem o e-mail. A rota fica fora do `/docs` (`include_in_schema=False`). No front, 5 cliques no logo do login em até 3 segundos mostram a aba **Produtor**, com o campo do código.
+- Por quê: o cadastro público não pode criar produtor, e o primeiro produtor precisava de um caminho sem mexer no banco. Os cliques só escondem o formulário, porque o código do front é público; quem protege é o código conferido no back. Com 32 caracteres aleatórios, adivinhar é impraticável mesmo sem limite de tentativas.
+- Ficou de fora: limite de tentativas (difícil de manter nas funções do Vercel), códigos de uso único com validade (convites) e um terceiro perfil de administrador.
+- Onde está: `configuracao.py`, `esquemas/usuario.py` (`ProdutorCriacao`), `servicos/usuario.cadastrar_produtor`, `rotas/usuarios.py`, `Login` em `frontend/src/App.jsx`.
+
+## O produtor é ativado por um código enviado ao administrador (substitui o código fixo)
+- Decisão: a aba **Produtor** (5 cliques no logo) pede o cadastro em `POST /usuarios/produtor/solicitacoes`. O back grava um pedido em `solicitacoes_produtor`, gera um código de 6 dígitos (`secrets.randbelow`) e o envia pelo Resend ao `EMAIL_DO_ADMIN`, com o nome e o e-mail de quem pediu. O produtor só é criado em `.../{id}/confirmar`, com o código certo. O código vale 30 minutos, aceita 5 tentativas (na 5ª o pedido é cancelado) e serve uma vez só. Pedir de novo com o mesmo e-mail substitui o pedido anterior, e no máximo 3 pedidos esperam ao mesmo tempo (429).
+- Por quê: o código fixo valia para sempre e para qualquer um que o soubesse. O código por e-mail é novo a cada pedido, e o administrador vê quem pediu antes de passar o código.
+- Segurança: o banco guarda só o hash da senha e o do código (Argon2); o log não registra o código nem o e-mail; o `id` do pedido é um texto aleatório (`secrets.token_urlsafe`); a confirmação trava o pedido (`with_for_update`), e criar o produtor e apagar o pedido acontecem no mesmo commit. Se o e-mail não sair, o pedido é desfeito (503). O e-mail do administrador fica só nas variáveis, porque o repositório é público.
+- Ficou de fora: limite por IP, reenviar o mesmo código, painel de pedidos para o administrador e confirmar o e-mail de quem pede.
+- Onde está: `modelos/solicitacao_produtor.py`, migration `0003_solicitacoes_produtor`, `repositorios/solicitacao_produtor.py`, `servicos/email.py`, `servicos/usuario.py` (`solicitar_produtor`, `confirmar_produtor`), `rotas/usuarios.py`, `Login` em `frontend/src/App.jsx`. O plano está em `.docs/plano-ativacao-produtor.md`.

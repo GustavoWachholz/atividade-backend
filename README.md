@@ -7,10 +7,10 @@ Projeto da **UC4 · Back-end de Projetos Web** (Senac Blumenau), Cartilha 3.
 A horta vende cestas semanais, e hoje os pedidos chegam por grupo de mensagens e as cestas são montadas
 no chute. O sistema organiza o pedido e a separação, respeitando o limite de itens de cada tamanho.
 
-| Perfil | Quem é | O que faz | Onde usa |
-| --- | --- | --- | --- |
-| `assinante` | Aline | pede a cesta da semana, vê o que foi colhido, as cestas dela e o que foi separado | celular |
-| `produtor` | Vanderlei | cadastra a colheita da semana, vê todas as cestas com filtro por tamanho e separa os produtos | computador |
+| Perfil | O que faz | Onde usa |
+| --- | --- | --- |
+| `assinante` | pede a cesta da semana, vê o que foi colhido, as cestas dela e o que foi separado | celular |
+| `produtor` | cadastra os produtos e a colheita da semana, vê todas as cestas com filtro por tamanho e separa os produtos | computador |
 
 ## Como rodar o back
 
@@ -73,14 +73,21 @@ O front abre em `http://localhost:5173`. O back precisa estar rodando.
 
 ## Para testar
 
-Um banco novo não tem usuários. Cadastre um de cada perfil no `/docs`, em `POST /usuarios`, com dados só de teste:
+Um banco novo não tem usuários. O cadastro (`POST /usuarios` no `/docs`, ou a aba **Cadastrar** do front) cria
+sempre uma **assinante**: o corpo leva só `nome`, `email` e `senha`, e quem mandar `tipo` recebe 422.
 
-```json
-{ "nome": "Aline", "tipo": "assinante", "email": "aline@teste.com", "senha": "teste1234" }
-{ "nome": "Vanderlei", "tipo": "produtor", "email": "vanderlei@teste.com", "senha": "teste1234" }
-```
+Não há cadastro público de produtor. O produtor é ativado por um código enviado ao e-mail do administrador:
 
-A tela de login do front também tem a opção de cadastro. Depois:
+1. Crie uma conta no [Resend](https://resend.com) com o e-mail do administrador e gere uma chave de API. Sem domínio
+   próprio, o Resend só envia para o e-mail dono da conta, que é o do administrador.
+2. Coloque `EMAIL_DO_ADMIN` e `CHAVE_DO_EMAIL` no `backend/.env` e nas variáveis do projeto do back no Vercel.
+   Sem as duas, o cadastro de produtor responde 503. O e-mail fica só nas variáveis, nunca no código.
+3. Na tela de login, clique **5 vezes no logo** em até 3 segundos. Aparece a aba **Produtor**.
+4. Preencha nome, e-mail e senha e clique em **Solicitar cadastro**. O administrador recebe um código de 6 dígitos,
+   que vale 30 minutos, aceita 5 tentativas e serve uma vez só.
+5. Digite o código na tela seguinte. A conta nasce produtor e já entra.
+
+Depois:
 
 1. No `/docs`, clique em **Authorize**: o e-mail em `username` e a senha em `password`.
 2. No front, entre com cada perfil. A assinante cai no **Início**, e o produtor em **A separação**.
@@ -97,7 +104,9 @@ Sem ele, ou com o token inválido ou vencido (60 minutos), a resposta é **401**
 
 | Método | Caminho | O que faz | Quem pode | Sucesso | Recusas |
 | --- | --- | --- | --- | --- | --- |
-| POST | `/usuarios` | cadastra um usuário, com a senha em hash | qualquer pessoa | 201 | 409 e-mail já cadastrado · 422 dados inválidos |
+| POST | `/usuarios/produtor/solicitacoes` | pede o cadastro de produtor e manda o código ao administrador. Fora do `/docs` | qualquer pessoa | 202 | 409 e-mail já cadastrado · 422 dados inválidos · 429 já há 3 pedidos esperando · 503 e-mail não configurado ou fora do ar |
+| POST | `/usuarios/produtor/solicitacoes/{id}/confirmar` | ativa o pedido com o código de 6 dígitos e cria o produtor. Fora do `/docs` | quem tem o código | 201 | 403 código errado (na 5ª, cancela) · 404 pedido inexistente ou já usado · 409 e-mail já cadastrado · 410 código vencido · 422 código fora do formato |
+| POST | `/usuarios` | cadastra uma assinante, com a senha em hash. Não aceita `tipo` | qualquer pessoa | 201 | 409 e-mail já cadastrado · 422 dados inválidos ou campo `tipo` enviado |
 | POST | `/login` | troca e-mail e senha por um token JWT | qualquer pessoa | 200 | 401 e-mail ou senha incorretos · 422 formulário incompleto |
 | GET | `/usuarios/eu` | mostra quem está logado | grupos com `conta:ver`: assinante e produtor | 200 | 401 · 403 sem permissão |
 | POST | `/cestas` | pede a cesta da semana. O dono vem do token | grupo com `cestas:pedir`: assinante | 201 | 401 · 403 sem permissão · 409 semana que não é a atual · 422 dados inválidos |
@@ -119,7 +128,7 @@ Sem ele, ou com o token inválido ou vencido (60 minutos), a resposta é **401**
 **401 ou 403?** O 401 responde "quem é você?": falta o token, ou ele não vale. O 403 responde "você pode fazer isto?":
 o usuário foi identificado, mas o grupo dele não tem a permissão, ou a cesta não é dele.
 
-**Grupos:** cada persona é um grupo (o `tipo` do usuário), com um conjunto de permissões definido em `GRUPOS`, no
+**Grupos:** cada perfil é um grupo (o `tipo` do usuário), com um conjunto de permissões definido em `GRUPOS`, no
 `backend/seguranca.py`. A tabela completa está em [.docs/arquitetura.md](.docs/arquitetura.md).
 
 ## A regra

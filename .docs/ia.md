@@ -8,7 +8,7 @@ Combinada em 2026-10-22, implementada em 2026-11-05 e publicada em 2026-11-10, c
 
 ### Ficha
 
-- **Perfil:** Vanderlei, produtor, no computador. A assinante não tem funcionalidade de IA nesta etapa.
+- **Perfil:** produtor, no computador. A assinante não tem funcionalidade de IA nesta etapa.
 - **Dor:** na quinta ele monta as cestas "no chute" e precisa saber o que já foi e quanto cabe, para não
   faltar nem sobrar.
 - **Benefício:** com a colheita da semana já no estoque, a IA sugere a distribuição dos produtos entre todas

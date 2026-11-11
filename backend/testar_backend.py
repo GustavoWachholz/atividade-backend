@@ -38,6 +38,9 @@ from servicos import cesta as servico_cesta
 from servicos import produto_separado as servico_produto
 from servicos import estoque as servico_estoque
 from servicos import produto as servico_catalogo
+from servicos import email as servico_email
+from servicos.excecoes import EmailIndisponivel
+from modelos.solicitacao_produtor import SolicitacaoProdutor
 from servicos import pre_preenchimento as servico_ia
 from servicos.excecoes import ConfirmacaoRecusada, IaIndisponivel, NadaParaPreencher
 from esquemas.pre_preenchimento import ConfirmacaoDoRascunho
@@ -74,7 +77,7 @@ class TestesBackend(unittest.TestCase):
 
         app.dependency_overrides[obter_sessao] = sessao_teste
         # Define usuário autenticado padrão (produtor) para consultas gerais
-        self.usuario_atual = Usuario(id=99, nome="Vanderlei", tipo="produtor", email="produtor@example.com")
+        self.usuario_atual = Usuario(id=99, nome="Produtor", tipo="produtor", email="produtor@example.com")
         app.dependency_overrides[obter_usuario_atual] = lambda: self.usuario_atual
         self.addCleanup(app.dependency_overrides.clear)
         # Os cenários usam semanas fixas do passado; a trava da semana atual tem teste próprio.
@@ -110,27 +113,28 @@ class TestesBackend(unittest.TestCase):
     # A assinante pede uma cesta numa semana qualquer e devolve a resposta, sem conferir o status.
     def pedir(self, assinante_id, semana, tamanho):
         app.dependency_overrides[obter_usuario_atual] = lambda: Usuario(
-            id=assinante_id, nome="Aline", tipo="assinante", email=f"aline{assinante_id}@example.com")
+            id=assinante_id, nome="Assinante", tipo="assinante", email=f"assinante{assinante_id}@example.com")
         resposta = self.cliente.post("/cestas", json={"semana": semana, "tamanho": tamanho})
         app.dependency_overrides[obter_usuario_atual] = lambda: self.usuario_atual
         return resposta
 
     # O auxiliar confere o conteúdo do cadastro usado pelos cenários de cesta.
-    def criar_usuario(self, tipo="assinante"):
+    # O cadastro público cria sempre uma assinante.
+    def criar_usuario(self, nome="Assinante"):
         self.numero_usuario = getattr(self, "numero_usuario", 0) + 1
         resposta = self.cliente.post("/usuarios", json={
-            "nome": "Aline", "tipo": tipo,
-            "email": f"aline{self.numero_usuario}@example.com", "senha": "teste1234",
+            "nome": nome,
+            "email": f"assinante{self.numero_usuario}@example.com", "senha": "teste1234",
         })
         self.assertEqual(resposta.status_code, 201)
-        self.assertEqual(resposta.json()["tipo"], tipo)
+        self.assertEqual(resposta.json()["tipo"], "assinante")
         return resposta.json()["id"]
 
     # Cria uma cesta válida. O assinante_id falso no corpo deve ser ignorado: o dono vem do token.
     # Por padrão o produtor já aprova o pedido, porque só uma cesta em separação recebe produtos.
     def criar_cesta(self, assinante_id, tamanho="pequena", aprovar=True):
         app.dependency_overrides[obter_usuario_atual] = lambda: Usuario(
-            id=assinante_id, nome="Aline", tipo="assinante", email=f"aline{assinante_id}@example.com"
+            id=assinante_id, nome="Assinante", tipo="assinante", email=f"assinante{assinante_id}@example.com"
         )
         resposta = self.cliente.post("/cestas", json={
             "assinante_id": 999, "semana": "2026-10-05", "tamanho": tamanho
@@ -156,19 +160,106 @@ class TestesBackend(unittest.TestCase):
             "produto_id": self.produto_id("Alface"), "quantidade": quantidade
         })
 
-    # Tipos inválidos não podem criar usuários nem aparecer na persistência.
+    # O cadastro público não aceita tipo: quem manda "produtor" recebe 422 e nada é gravado.
     def test_usuarios_e_validacao(self):
         self.criar_usuario()
-        self.criar_usuario("produtor")
-        resposta = self.cliente.post("/usuarios", json={"nome": "Ana", "tipo": "outro"})
-        self.assertEqual(resposta.status_code, 422)
+        for tipo in ["produtor", "assinante", "outro"]:
+            resposta = self.cliente.post("/usuarios", json={
+                "nome": "Ana", "tipo": tipo, "email": f"{tipo}@example.com", "senha": "teste1234"})
+            self.assertEqual(resposta.status_code, 422, tipo)
         with self.Sessao() as sessao:
-            self.assertEqual(len(sessao.query(Usuario).all()), 2)
+            self.assertEqual([u.tipo for u in sessao.query(Usuario).all()], ["assinante"])
         # A lista pública de usuários foi retirada: ela expunha o e-mail de todo mundo.
         self.assertEqual(self.cliente.get("/usuarios").status_code, 405)
 
+    # Pede o cadastro de produtor com o envio de e-mail falso, e devolve a resposta e o código "enviado".
+    def pedir_produtor(self, email="produtor.novo@example.com"):
+        with patch.object(servico_email, "enviar_codigo_ao_admin") as enviar:
+            resposta = self.cliente.post("/usuarios/produtor/solicitacoes", json={
+                "nome": "Produtor", "email": email, "senha": "teste1234"})
+        codigo = enviar.call_args.args[2] if enviar.called else None
+        return resposta, codigo
+
+    def confirmar(self, solicitacao_id, codigo):
+        return self.cliente.post(f"/usuarios/produtor/solicitacoes/{solicitacao_id}/confirmar", json={"codigo": codigo})
+
+    @staticmethod
+    def outro_codigo(codigo):
+        return f"{(int(codigo) + 1) % 10 ** 6:06d}"
+
+    # O pedido não cria usuário; o código certo cria o produtor, entra no login e não vale uma segunda vez.
+    def test_ativacao_do_produtor(self):
+        pedido, codigo = self.pedir_produtor()
+        self.assertEqual(pedido.status_code, 202)
+        self.assertRegex(codigo, r"^\d{6}$")
+        self.assertEqual(pedido.json()["tentativas"], 5)
+        with self.Sessao() as sessao:
+            self.assertEqual(sessao.query(Usuario).count(), 0)
+            solicitacao = sessao.get(SolicitacaoProdutor, pedido.json()["id"])
+            # O banco guarda só os hashes: nem o código nem a senha em texto.
+            self.assertNotIn(codigo, solicitacao.codigo_hash)
+            self.assertTrue(solicitacao.senha_hash.startswith("$argon2id$"))
+        errado = self.confirmar(pedido.json()["id"], self.outro_codigo(codigo))
+        self.assertEqual((errado.status_code, errado.json()["detail"]), (403, "Código incorreto. Restam 4 tentativas."))
+        for invalido in ["12345", "abcdef", "1234567"]:
+            self.assertEqual(self.confirmar(pedido.json()["id"], invalido).status_code, 422)
+        certo = self.confirmar(pedido.json()["id"], codigo)
+        self.assertEqual((certo.status_code, certo.json()["tipo"]), (201, "produtor"))
+        login = self.cliente.post("/login", data={"username": "produtor.novo@example.com", "password": "teste1234"})
+        self.assertEqual(login.status_code, 200)
+        self.assertEqual(self.confirmar(pedido.json()["id"], codigo).status_code, 404)
+        # E-mail que já tem conta não pede de novo. As rotas ficam fora do /docs.
+        self.assertEqual(self.pedir_produtor()[0].status_code, 409)
+        caminhos = self.cliente.get("/openapi.json").json()["paths"]
+        self.assertFalse([caminho for caminho in caminhos if caminho.startswith("/usuarios/produtor")])
+
+    # Na 5ª tentativa errada o pedido é cancelado, e nem o código certo vale mais.
+    def test_ativacao_cancela_depois_de_cinco_erros(self):
+        pedido, codigo = self.pedir_produtor()
+        for restantes in [4, 3, 2, 1]:
+            self.assertEqual(self.confirmar(pedido.json()["id"], self.outro_codigo(codigo)).status_code, 403, restantes)
+        ultima = self.confirmar(pedido.json()["id"], self.outro_codigo(codigo))
+        self.assertIn("O pedido foi cancelado", ultima.json()["detail"])
+        self.assertEqual(self.confirmar(pedido.json()["id"], codigo).status_code, 404)
+
+    # Código vencido responde 410 e apaga o pedido.
+    def test_ativacao_vencida(self):
+        pedido, codigo = self.pedir_produtor()
+        with self.Sessao() as sessao:
+            solicitacao = sessao.get(SolicitacaoProdutor, pedido.json()["id"])
+            solicitacao.expira_em = datetime(2026, 1, 1)
+            sessao.commit()
+        self.assertEqual(self.confirmar(pedido.json()["id"], codigo).status_code, 410)
+        with self.Sessao() as sessao:
+            self.assertEqual(sessao.query(SolicitacaoProdutor).count(), 0)
+
+    # Se o e-mail não sair, o pedido não fica gravado. Sem a configuração do e-mail, a rota responde 503.
+    def test_ativacao_sem_email_nao_grava(self):
+        with patch.object(servico_email, "enviar_codigo_ao_admin", side_effect=EmailIndisponivel("fora do ar")):
+            resposta = self.cliente.post("/usuarios/produtor/solicitacoes", json={
+                "nome": "Produtor", "email": "produtor.novo@example.com", "senha": "teste1234"})
+        self.assertEqual(resposta.status_code, 503)
+        with patch.object(configuracao, "CHAVE_DO_EMAIL", ""), patch.object(servico_email.httpx, "post") as post:
+            desligado = self.cliente.post("/usuarios/produtor/solicitacoes", json={
+                "nome": "Produtor", "email": "produtor.novo@example.com", "senha": "teste1234"})
+            post.assert_not_called()
+        self.assertEqual(desligado.status_code, 503)
+        with self.Sessao() as sessao:
+            self.assertEqual(sessao.query(SolicitacaoProdutor).count(), 0)
+
+    # No máximo 3 pedidos esperam ao mesmo tempo. Pedir de novo com o mesmo e-mail substitui o pedido anterior.
+    def test_ativacao_limita_os_pedidos(self):
+        primeiro, codigo_antigo = self.pedir_produtor("um@example.com")
+        segundo, _ = self.pedir_produtor("um@example.com")
+        self.assertEqual(segundo.status_code, 202)
+        self.assertEqual(self.confirmar(primeiro.json()["id"], codigo_antigo).status_code, 404)
+        self.assertEqual(self.pedir_produtor("dois@example.com")[0].status_code, 202)
+        self.assertEqual(self.pedir_produtor("tres@example.com")[0].status_code, 202)
+        excesso, codigo = self.pedir_produtor("quatro@example.com")
+        self.assertEqual((excesso.status_code, codigo), (429, None))
+
     def test_email_unico_e_senha_em_hash(self):
-        dados = {"nome": "Ana", "tipo": "assinante", "email": "ANA@example.com", "senha": "teste1234"}
+        dados = {"nome": "Ana", "email": "ANA@example.com", "senha": "teste1234"}
         resposta = self.cliente.post("/usuarios", json=dados)
         self.assertEqual(resposta.status_code, 201)
         self.assertEqual(resposta.json()["email"], "ana@example.com")
@@ -187,12 +278,9 @@ class TestesBackend(unittest.TestCase):
     # Uma recusa não deve deixar cestas salvas para produtores ou usuários ausentes.
     def test_criacao_e_recusa_de_cestas(self):
         assinante = self.criar_usuario()
-        produtor = self.criar_usuario("produtor")
         cesta = self.criar_cesta(assinante, aprovar=False)
-        # Testar tentativa com perfil produtor (deve retornar 403)
-        app.dependency_overrides[obter_usuario_atual] = lambda: Usuario(
-            id=produtor, nome="Produtor", tipo="produtor", email="produtor@example.com"
-        )
+        # O produtor não pede cesta (deve retornar 403)
+        app.dependency_overrides[obter_usuario_atual] = lambda: self.usuario_atual
         resposta = self.cliente.post("/cestas", json={"semana": "2026-10-05", "tamanho": "media"})
         self.assertEqual(resposta.status_code, 403)
 
@@ -202,8 +290,8 @@ class TestesBackend(unittest.TestCase):
         self.assertEqual(detalhe["quantidade_ocupada"], 0)
         self.assertEqual(detalhe["quantidade_restante"], 5)
         # O produtor vê o nome de quem pediu, mas não o e-mail nem a senha da assinante.
-        self.assertEqual(detalhe["assinante"], {"id": assinante, "nome": "Aline"})
-        self.assertEqual(self.cliente.get("/cestas").json()[0]["assinante"]["nome"], "Aline")
+        self.assertEqual(detalhe["assinante"], {"id": assinante, "nome": "Assinante"})
+        self.assertEqual(self.cliente.get("/cestas").json()[0]["assinante"]["nome"], "Assinante")
 
     # A soma deve considerar produtos anteriores e preservar dados após a recusa.
     def test_soma_das_quantidades_e_situacao(self):
@@ -256,7 +344,7 @@ class TestesBackend(unittest.TestCase):
     def test_entradas_invalidas(self):
         assinante = self.criar_usuario()
         app.dependency_overrides[obter_usuario_atual] = lambda: Usuario(
-            id=assinante, nome="Aline", tipo="assinante", email=f"aline{assinante}@example.com"
+            id=assinante, nome="Assinante", tipo="assinante", email=f"assinante{assinante}@example.com"
         )
         dados = {"semana": "2026-10-05", "tamanho": "pequena"}
         for mudanca in [{"tamanho": "gigante"}, {"semana": "invalida"}]:
@@ -447,7 +535,7 @@ class TestesBackend(unittest.TestCase):
         for indice in range(23):
             semana = "2026-10-12" if indice % 2 == 0 else "2026-10-05"
             app.dependency_overrides[obter_usuario_atual] = lambda: Usuario(
-                id=assinante, nome="Aline", tipo="assinante", email=f"aline{assinante}@example.com"
+                id=assinante, nome="Assinante", tipo="assinante", email=f"assinante{assinante}@example.com"
             )
             resposta = self.cliente.post("/cestas", json={"semana": semana, "tamanho": "media"})
             self.assertEqual(resposta.status_code, 201)
@@ -474,7 +562,7 @@ class TestesBackend(unittest.TestCase):
             rascunho = self.cliente.post("/cestas/pre-preenchimento", json={"semana": "2026-10-07"})
         self.assertEqual(rascunho.status_code, 200)
         self.assertEqual(rascunho.json()["semana"], "2026-10-05")
-        self.assertEqual(rascunho.json()["cestas"][0]["assinante"], "Aline")
+        self.assertEqual(rascunho.json()["cestas"][0]["assinante"], "Assinante")
         self.assertEqual(len(rascunho.json()["cestas"][0]["itens"]), 2)
         self.assertEqual(self.cliente.get(f"/cestas/{cesta}/produtos").json(), [])
 
@@ -502,7 +590,7 @@ class TestesBackend(unittest.TestCase):
 
     # Cesta pedida fica fora da sugestão e é contada para a tela avisar o produtor.
     def test_cesta_pedida_fica_fora_do_rascunho(self):
-        assinante = self.criar_usuario()
+        assinante = self.criar_usuario("Nome Que Nao Sai")
         aprovada = self.criar_cesta(assinante)
         self.criar_cesta(assinante, aprovar=False)
         with patch.object(servico_ia, "chamar_modelo", return_value=[]) as chamar:
@@ -510,7 +598,7 @@ class TestesBackend(unittest.TestCase):
         self.assertEqual(resposta.status_code, 200)
         self.assertEqual([c["cesta_id"] for c in resposta.json()["cestas"]], [aprovada])
         self.assertEqual(resposta.json()["cestas_pedidas"], 1)
-        self.assertNotIn("Aline", chamar.call_args.args[0])
+        self.assertNotIn("Nome Que Nao Sai", chamar.call_args.args[0])
 
     # Sem cesta aprovada, o modelo nem é chamado.
     def test_semana_sem_cesta_nao_chama_o_modelo(self):
@@ -523,12 +611,12 @@ class TestesBackend(unittest.TestCase):
 # Estes testes validam SQL e HTTP sem conexão com o banco.
 class TestesSemConexao(unittest.TestCase):
     def setUp(self):
-        self.usuario_teste = Usuario(id=1, nome="Vanderlei", tipo="produtor", email="vanderlei@example.com")
+        self.usuario_teste = Usuario(id=1, nome="Produtor", tipo="produtor", email="produtor@example.com")
         app.dependency_overrides[obter_usuario_atual] = lambda: self.usuario_teste
         self.addCleanup(app.dependency_overrides.clear)
 
     def test_normalizacao_email_preserva_senha(self):
-        dados = UsuarioCriacao(nome=" Ana ", tipo="assinante", email=" ANA@example.com ", senha=" teste1234 ")
+        dados = UsuarioCriacao(nome=" Ana ", email=" ANA@example.com ", senha=" teste1234 ")
         self.assertEqual(dados.email, "ana@example.com")
         self.assertEqual(dados.nome, "Ana")
         self.assertEqual(dados.senha, " teste1234 ")
@@ -544,7 +632,7 @@ class TestesSemConexao(unittest.TestCase):
             self.assertNotIn("senha_hash", resposta.json())
             self.assertNotIn("hash-reservado", resposta.text)
             with patch.object(servico_usuario, "cadastrar", return_value=usuario):
-                resposta = cliente.post("/usuarios", json={"nome": "Ana", "tipo": "assinante", "email": "ana@example.com", "senha": "teste1234"})
+                resposta = cliente.post("/usuarios", json={"nome": "Ana", "email": "ana@example.com", "senha": "teste1234"})
                 self.assertEqual(resposta.status_code, 201)
                 self.assertNotIn("senha", resposta.json())
                 self.assertNotIn("senha_hash", resposta.json())
@@ -552,11 +640,11 @@ class TestesSemConexao(unittest.TestCase):
     def test_credenciais_invalidas_recusadas(self):
         with TestClient(app) as cliente:
             with patch.object(servico_usuario, "cadastrar") as cadastrar:
-                base = {"nome": "Ana", "tipo": "assinante", "email": "ana@example.com", "senha": "teste1234"}
+                base = {"nome": "Ana", "email": "ana@example.com", "senha": "teste1234"}
                 invalidos = [{**base, **extra} for extra in [
                     {"email": "invalido"}, {"senha": "curta"}, {"senha": "x" * 73},
                     {"senha": 12345678}, {"senha_hash": "hash-enviado"}, {"nome": "A"},
-                    {"tipo": "executor"}, {"email": None}, {"senha": None},
+                    {"tipo": "executor"}, {"tipo": "produtor"}, {"email": None}, {"senha": None},
                 ]]
                 invalidos.extend({k: v for k, v in base.items() if k != campo} for campo in ["email", "senha"])
                 for dados in invalidos:
@@ -565,7 +653,7 @@ class TestesSemConexao(unittest.TestCase):
                 cadastrar.assert_not_called()
 
     def test_email_duplicado_retorna_conflito(self):
-        dados = UsuarioCriacao(nome="Ana", tipo="assinante", email="ana@example.com", senha="teste1234")
+        dados = UsuarioCriacao(nome="Ana", email="ana@example.com", senha="teste1234")
         with patch.object(repositorio_usuario, "buscar_por_email", return_value=Usuario(id=1)):
             with patch.object(repositorio_usuario, "salvar") as salvar:
                 with self.assertRaises(EmailEmUso):
@@ -576,7 +664,7 @@ class TestesSemConexao(unittest.TestCase):
                 self.assertEqual(cliente.post("/usuarios", json=dados.model_dump()).status_code, 409)
 
     def test_conflito_simultaneo_desfaz_sessao(self):
-        dados = UsuarioCriacao(nome="Ana", tipo="assinante", email="ana@example.com", senha="teste1234")
+        dados = UsuarioCriacao(nome="Ana", email="ana@example.com", senha="teste1234")
         origem = Exception("Duplicado")
         origem.errno = 1062
         erro = IntegrityError("INSERT", {}, origem)
@@ -589,7 +677,7 @@ class TestesSemConexao(unittest.TestCase):
         sessao.refresh.assert_not_called()
 
     def test_erro_de_banco_nao_e_tratado_como_email_duplicado(self):
-        dados = UsuarioCriacao(nome="Ana", tipo="assinante", email="ana@example.com", senha="teste1234")
+        dados = UsuarioCriacao(nome="Ana", email="ana@example.com", senha="teste1234")
         origem = Exception("Outra falha")
         origem.errno = 1048
         erro = IntegrityError("INSERT", {}, origem)
@@ -599,7 +687,7 @@ class TestesSemConexao(unittest.TestCase):
                     servico_usuario.cadastrar(Mock(), dados)
 
     def test_servico_envia_apenas_hash_ao_repositorio(self):
-        dados = UsuarioCriacao(nome="Ana", tipo="assinante", email="ana@example.com", senha="teste1234")
+        dados = UsuarioCriacao(nome="Ana", email="ana@example.com", senha="teste1234")
         with patch.object(repositorio_usuario, "buscar_por_email", return_value=None):
             with patch.object(repositorio_usuario, "salvar") as salvar:
                 servico_usuario.cadastrar(Mock(), dados)
@@ -673,7 +761,7 @@ class TestesSemConexao(unittest.TestCase):
 
     # O serviço decide o que cada perfil vê: a assinante não escapa do filtro com assinante_id.
     def test_servico_lista_so_as_cestas_da_assinante(self):
-        assinante = Usuario(id=2, nome="Aline", tipo="assinante")
+        assinante = Usuario(id=2, nome="Assinante", tipo="assinante")
         with patch.object(repositorio_cesta, "listar", return_value=[]) as listar:
             servico_cesta.listar(Mock(), assinante, "media", 7, 1)
             self.assertEqual(listar.call_args.args[1:], ("media", 2, 1, None))
@@ -721,29 +809,29 @@ class TestesSemConexao(unittest.TestCase):
             self.assertEqual(cliente.post("/cestas/1/produtos", json={"produto_id": 1, "quantidade": 1}).status_code, 401)
 
     def test_login_sucesso_retorna_jwt_e_falha_retorna_401(self):
-        usuario = Usuario(id=1, nome="Vanderlei", tipo="produtor", email="vanderlei@example.com")
+        usuario = Usuario(id=1, nome="Produtor", tipo="produtor", email="produtor@example.com")
         with patch.object(servico_usuario, "autenticar", return_value=usuario):
             with TestClient(app) as cliente:
-                res = cliente.post("/login", data={"username": "vanderlei@example.com", "password": "correta"})
+                res = cliente.post("/login", data={"username": "produtor@example.com", "password": "correta"})
                 self.assertEqual(res.status_code, 200)
                 self.assertIn("access_token", res.json())
                 self.assertEqual(res.json()["token_type"], "bearer")
 
         with patch.object(servico_usuario, "autenticar", return_value=None):
             with TestClient(app) as cliente:
-                res = cliente.post("/login", data={"username": "vanderlei@example.com", "password": "incorreta"})
+                res = cliente.post("/login", data={"username": "produtor@example.com", "password": "incorreta"})
                 self.assertEqual(res.status_code, 401)
                 self.assertEqual(res.json()["detail"], "E-mail ou senha incorretos")
 
     def test_grupo_assinante_sem_permissao_de_separar_recebe_403(self):
-        assinante = Usuario(id=2, nome="Aline", tipo="assinante", email="aline@example.com")
+        assinante = Usuario(id=2, nome="Assinante", tipo="assinante", email="assinante@example.com")
         app.dependency_overrides[obter_usuario_atual] = lambda: assinante
         with TestClient(app) as cliente:
             res = cliente.post("/cestas/1/produtos", json={"produto_id": 1, "quantidade": 1})
             self.assertEqual(res.status_code, 403)
             self.assertEqual(res.json()["detail"], "Seu grupo não pode separar produtos")
 
-    # [NOVO · grupos] A tabela GRUPOS libera para cada persona só as permissões dela.
+    # [NOVO · grupos] A tabela GRUPOS libera para cada perfil só as permissões dele.
     def test_permissoes_de_cada_grupo(self):
         assinante = Usuario(tipo="assinante")
         produtor = Usuario(tipo="produtor")
@@ -778,7 +866,7 @@ class TestesSemConexao(unittest.TestCase):
 
     # [NOVO · grupos] A assinante vê o estoque, mas não cadastra a colheita.
     def test_assinante_nao_cadastra_estoque(self):
-        assinante = Usuario(id=2, nome="Aline", tipo="assinante", email="aline@example.com")
+        assinante = Usuario(id=2, nome="Assinante", tipo="assinante", email="assinante@example.com")
         app.dependency_overrides[obter_usuario_atual] = lambda: assinante
         with TestClient(app) as cliente:
             with patch.object(servico_estoque, "cadastrar") as cadastrar:
@@ -793,7 +881,7 @@ class TestesSemConexao(unittest.TestCase):
 
     # [NOVO · grupos] A assinante vê o catálogo, mas não cadastra nem edita produto.
     def test_assinante_ve_mas_nao_edita_o_catalogo(self):
-        assinante = Usuario(id=2, nome="Aline", tipo="assinante", email="aline@example.com")
+        assinante = Usuario(id=2, nome="Assinante", tipo="assinante", email="assinante@example.com")
         app.dependency_overrides[obter_usuario_atual] = lambda: assinante
         with TestClient(app) as cliente:
             with patch.object(servico_catalogo, "cadastrar") as cadastrar, \
@@ -868,14 +956,14 @@ class TestesSemConexao(unittest.TestCase):
 
     # [NOVO · grupos] A assinante não aprova, reprova nem conclui: recebe 403 antes de qualquer busca.
     def test_assinante_nao_decide_o_pedido(self):
-        assinante = Usuario(id=2, nome="Aline", tipo="assinante", email="aline@example.com")
+        assinante = Usuario(id=2, nome="Assinante", tipo="assinante", email="assinante@example.com")
         app.dependency_overrides[obter_usuario_atual] = lambda: assinante
         with TestClient(app) as cliente:
             for acao in ["aprovar", "reprovar", "concluir"]:
                 self.assertEqual(cliente.patch(f"/cestas/1/{acao}").status_code, 403, acao)
 
     def test_assinante_acessando_cesta_alheia_retorna_403(self):
-        assinante = Usuario(id=2, nome="Aline", tipo="assinante", email="aline@example.com")
+        assinante = Usuario(id=2, nome="Assinante", tipo="assinante", email="assinante@example.com")
         app.dependency_overrides[obter_usuario_atual] = lambda: assinante
         cesta_alheia = Cesta(id=10, assinante_id=999, tamanho="pequena", situacao="pedida")
         with patch.object(servico_cesta, "buscar_por_id", return_value=cesta_alheia):
@@ -1100,7 +1188,7 @@ class TestesPrePreenchimento(unittest.TestCase):
 # As rotas do pré-preenchimento: permissões e tradução das recusas para status.
 class TestesRotasDoPrePreenchimento(unittest.TestCase):
     def setUp(self):
-        self.usuario = Usuario(id=1, nome="Vanderlei", tipo="produtor", email="vanderlei@example.com")
+        self.usuario = Usuario(id=1, nome="Produtor", tipo="produtor", email="produtor@example.com")
         app.dependency_overrides[obter_usuario_atual] = lambda: self.usuario
         app.dependency_overrides[obter_sessao] = lambda: Mock()
         self.addCleanup(app.dependency_overrides.clear)
@@ -1109,7 +1197,7 @@ class TestesRotasDoPrePreenchimento(unittest.TestCase):
 
     # [NOVO · grupos] A assinante não pede a sugestão nem confirma: recebe 403 antes de qualquer conta.
     def test_assinante_recebe_403(self):
-        self.usuario = Usuario(id=2, nome="Aline", tipo="assinante", email="aline@example.com")
+        self.usuario = Usuario(id=2, nome="Assinante", tipo="assinante", email="assinante@example.com")
         corpo = {"semana": "2026-10-05", "itens": [{"cesta_id": 1, "produto_id": 1, "quantidade": 1}]}
         with patch.object(servico_ia, "sugerir") as sugerir, patch.object(servico_ia, "confirmar") as confirmar:
             self.assertEqual(self.cliente.post("/cestas/pre-preenchimento",
@@ -1148,6 +1236,34 @@ class TestesRotasDoPrePreenchimento(unittest.TestCase):
                 self.assertEqual(self.cliente.post("/cestas/pre-preenchimento/confirmar",
                                                    json=corpo).status_code, 422)
         confirmar.assert_not_called()
+
+
+# O envio do código ao administrador, sem chamar a internet.
+class TestesEmail(unittest.TestCase):
+    def setUp(self):
+        for nome, valor in [("CHAVE_DO_EMAIL", "chave-falsa"), ("EMAIL_DO_ADMIN", "admin@example.com")]:
+            patcher = patch.object(configuracao, nome, valor)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    # O e-mail vai só para o administrador, com o código, quem pediu e o prazo em horário de Brasília.
+    def test_codigo_vai_para_o_admin(self):
+        with patch.object(servico_email.httpx, "post") as post:
+            servico_email.enviar_codigo_ao_admin("Produtor", "pediu@example.com", "123456", datetime(2026, 11, 10, 15, 30))
+        corpo = post.call_args.kwargs["json"]
+        self.assertEqual(corpo["to"], ["admin@example.com"])
+        self.assertIn("123456", corpo["text"])
+        self.assertIn("pediu@example.com", corpo["text"])
+        self.assertIn("12:30", corpo["text"])
+        self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer chave-falsa")
+
+    # Falha do serviço de e-mail vira EmailIndisponivel, e não erro 500.
+    def test_falha_do_servico_vira_indisponivel(self):
+        import httpx
+        for erro in [httpx.ConnectTimeout("lento"), httpx.HTTPStatusError("401", request=Mock(), response=Mock())]:
+            with patch.object(servico_email.httpx, "post", side_effect=erro):
+                with self.assertRaises(EmailIndisponivel):
+                    servico_email.enviar_codigo_ao_admin("Produtor", "pediu@example.com", "123456", datetime(2026, 11, 10))
 
 
 # unittest executa os cenários sem exigir uma biblioteca adicional de testes.

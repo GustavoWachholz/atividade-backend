@@ -1,7 +1,7 @@
 # Cesta do Vale · o projeto em dez linhas
 
 - **O que é:** pedido e separação de cestas semanais de uma horta comunitária (Cartilha 3).
-- **Perfis:** `assinante` (Aline, no celular) pede e acompanha as cestas. `produtor` (Vanderlei, no computador) separa os produtos.
+- **Perfis:** `assinante` (no celular) pede e acompanha as cestas e é o único perfil do cadastro público. `produtor` (no computador) separa os produtos.
 - **Regra:** limite de 5, 8 ou 12 itens por tamanho. O pedido é aprovado pelo produtor (`pedida` → `em_separacao`), separado e concluído (`concluida`), ou reprovado (`recusada`).
 - **Estoque (fora da cartilha, pedido do autor):** o produtor cadastra a colheita da semana em unidades. Ela bloqueia o tamanho que não cabe no pedido e o produto que falta na separação.
 - **Back:** FastAPI, SQLAlchemy 2 e Postgres (Supabase), Alembic, `pwdlib` (Argon2) e PyJWT. Em `backend/`, rode `fastapi dev main.py`.

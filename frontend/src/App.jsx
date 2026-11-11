@@ -288,84 +288,216 @@ function Cabecalho({ usuario, aoSair, navegar, telaAtual }) {
   </header>;
 }
 
+// O pedido de cadastro de produtor que espera o código: { id, expira_em, email }.
+// Fica no sessionStorage para o passo do código sobreviver a uma recarga da página (a senha não fica guardada).
+const CHAVE_DO_PEDIDO = 'pedido_produtor';
+
+function lerPedidoGuardado() {
+  try {
+    const pedido = JSON.parse(sessionStorage.getItem(CHAVE_DO_PEDIDO));
+    return pedido && new Date(pedido.expira_em) > new Date() ? pedido : null;
+  } catch {
+    return null;
+  }
+}
+
+// A frase de erro que o back mandou em "detail", ou a frase padrão se não vier texto.
+async function erroDaResposta(resposta, padrao) {
+  try {
+    const corpo = await resposta.json();
+    return typeof corpo.detail === 'string' ? corpo.detail : padrao;
+  } catch {
+    return padrao;
+  }
+}
+
 // Componente de Login conforme o slide 35 da Aula 08
 function Login({ aoEntrar }) {
-  const [modo, setModo] = useState('login'); // 'login' ou 'cadastro'
+  const [pedido, setPedido] = useState(lerPedidoGuardado);
+  const [modo, setModo] = useState(() => (pedido ? 'produtor' : 'login')); // 'login', 'cadastro' ou 'produtor'
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [nome, setNome] = useState('');
-  const [tipo, setTipo] = useState('assinante');
+  const [codigo, setCodigo] = useState('');
   const [mensagem, setMensagem] = useState('');
+  const [aviso, setAviso] = useState('');
   const [carregando, setCarregando] = useState(false);
+  // 5 cliques no logo em até 3 segundos mostram a aba de cadastro de produtor.
+  // Os cliques só escondem o formulário; quem protege é o código que vai para o e-mail do administrador.
+  const [produtorVisivel, setProdutorVisivel] = useState(Boolean(pedido));
+  const cliquesNoLogo = useRef([]);
+
+  const clicarNoLogo = () => {
+    const agora = Date.now();
+    cliquesNoLogo.current = [...cliquesNoLogo.current.filter((momento) => agora - momento < 3000), agora];
+    if (cliquesNoLogo.current.length >= 5) {
+      cliquesNoLogo.current = [];
+      setProdutorVisivel(true);
+      trocarModo('produtor');
+    }
+  };
+
+  const trocarModo = (novo) => { setModo(novo); setMensagem(''); setAviso(''); };
+
+  const guardarPedido = (novo) => {
+    setPedido(novo);
+    setCodigo('');
+    try {
+      if (novo) sessionStorage.setItem(CHAVE_DO_PEDIDO, JSON.stringify(novo));
+      else sessionStorage.removeItem(CHAVE_DO_PEDIDO);
+    } catch {
+      // Sem sessionStorage, o passo do código só não sobrevive a uma recarga.
+    }
+  };
 
   // Mão na massa 2.6 (Slide 35): o /login lê URLSearchParams com username e password
-  const submeterLogin = (e) => {
-    e.preventDefault();
-    setMensagem('');
-    setCarregando(true);
-    const corpo = new URLSearchParams({ username: email, password: senha });
-    fetch(`${URL_DA_API}/login`, { method: 'POST', body: corpo })
+  const entrar = (emailDoLogin, senhaDoLogin, erro = 'e-mail ou senha incorretos') => {
+    const corpo = new URLSearchParams({ username: emailDoLogin, password: senhaDoLogin });
+    return fetch(`${URL_DA_API}/login`, { method: 'POST', body: corpo })
       .then((resposta) => {
-        if (!resposta.ok) throw new Error('e-mail ou senha incorretos');
+        if (!resposta.ok) throw new Error(erro);
         return resposta.json();
       })
       .then((dados) => {
         localStorage.setItem('token', dados.access_token);
         aoEntrar(dados.access_token);
-      })
+      });
+  };
+
+  // Liga o "carregando" e mostra a frase do erro, para os quatro envios da tela.
+  const enviar = (e, acao) => {
+    e.preventDefault();
+    setMensagem('');
+    setAviso('');
+    setCarregando(true);
+    acao()
       .catch((problema) => setMensagem(problema.message))
       .finally(() => setCarregando(false));
   };
 
-  const submeterCadastro = (e) => {
-    e.preventDefault();
-    setMensagem('');
-    setCarregando(true);
-    fetch(`${URL_DA_API}/usuarios`, {
+  const submeterLogin = (e) => enviar(e, () => entrar(email, senha));
+
+  // O cadastro público cria sempre uma assinante: o perfil não é enviado, e o back recusa quem o mandar.
+  const submeterCadastro = (e) => enviar(e, () => fetch(`${URL_DA_API}/usuarios`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nome, email, senha })
+  })
+    .then((resposta) => {
+      if (resposta.status === 409) throw new Error('Já existe um usuário com esse e-mail');
+      if (!resposta.ok) throw new Error('Erro ao cadastrar. Confira os campos digitados.');
+      // Após cadastrar com sucesso, realiza o login automaticamente
+      return entrar(email, senha, 'Conta criada, mas não foi possível entrar. Tente pelo login.');
+    }));
+
+  // Passo 1 do produtor: o back grava o pedido e manda o código ao e-mail do administrador.
+  const submeterPedido = (e) => enviar(e, () => fetch(`${URL_DA_API}/usuarios/produtor/solicitacoes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nome, email, senha })
+  })
+    .then(async (resposta) => {
+      if (!resposta.ok) {
+        throw new Error(await erroDaResposta(resposta, 'Não foi possível pedir o cadastro. Confira os campos digitados.'));
+      }
+      const novo = await resposta.json();
+      guardarPedido({ id: novo.id, expira_em: novo.expira_em, email });
+    }));
+
+  // Passo 2 do produtor: código certo cria a conta e entra. Pedido vencido, cancelado ou já usado volta ao passo 1.
+  const submeterCodigo = (e) => enviar(e, () => fetch(
+    `${URL_DA_API}/usuarios/produtor/solicitacoes/${encodeURIComponent(pedido.id)}/confirmar`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nome, tipo, email, senha })
+      body: JSON.stringify({ codigo })
     })
-      .then((resposta) => {
-        if (resposta.status === 409) throw new Error('Já existe um usuário com esse e-mail');
-        if (!resposta.ok) throw new Error('Erro ao cadastrar. Confira os campos digitados.');
-        return resposta.json();
-      })
-      .then(() => {
-        // Após cadastrar com sucesso, realiza o login automaticamente
-        const corpo = new URLSearchParams({ username: email, password: senha });
-        return fetch(`${URL_DA_API}/login`, { method: 'POST', body: corpo })
-          .then((r) => {
-            if (!r.ok) throw new Error('Conta criada, mas não foi possível entrar. Tente pelo login.');
-            return r.json();
-          })
-          .then((dados) => {
-            localStorage.setItem('token', dados.access_token);
-            aoEntrar(dados.access_token);
-          });
-      })
-      .catch((problema) => setMensagem(problema.message))
-      .finally(() => setCarregando(false));
+    .then(async (resposta) => {
+      if (!resposta.ok) {
+        const frase = await erroDaResposta(resposta, 'Não foi possível ativar a conta.');
+        if (resposta.status !== 403 || frase.includes('cancelado')) guardarPedido(null);
+        else setCodigo('');
+        throw new Error(frase);
+      }
+      const emailDoPedido = pedido.email;
+      guardarPedido(null);
+      // Depois de uma recarga a senha não está mais na tela: a pessoa entra pelo login.
+      if (!senha) {
+        setEmail(emailDoPedido);
+        setModo('login');
+        setAviso('Conta de produtor criada. Entre com o seu e-mail e a sua senha.');
+        return undefined;
+      }
+      return entrar(emailDoPedido, senha, 'Conta criada, mas não foi possível entrar. Tente pelo login.');
+    }));
+
+  const prazo = pedido
+    ? new Date(pedido.expira_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    : '';
+  const titulos = {
+    login: ['Entrar no sistema', 'Digite suas credenciais para acessar sua área.'],
+    cadastro: ['Criar nova conta', 'Cadastre-se para pedir a cesta da semana.'],
+    produtor: pedido
+      ? ['Código de ativação', `O código foi enviado ao administrador do sistema e vale até ${prazo}.`]
+      : ['Cadastro de produtor', 'Depois de enviar, o administrador recebe um código para ativar a conta.'],
   };
+
+  const camposDoCadastro = <>
+    <label>
+      Nome completo
+      <input
+        type="text"
+        required
+        minLength={2}
+        maxLength={100}
+        autoComplete="name"
+        value={nome}
+        onChange={(e) => setNome(e.target.value)}
+      />
+    </label>
+    <label>
+      E-mail
+      <input
+        type="email"
+        required
+        maxLength={100}
+        placeholder="seu@email.com"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+      />
+    </label>
+    <label>
+      Senha (mínimo 8 caracteres)
+      <input
+        type="password"
+        required
+        minLength={8}
+        autoComplete="new-password"
+        placeholder="Mínimo 8 caracteres"
+        value={senha}
+        onChange={(e) => setSenha(e.target.value)}
+      />
+    </label>
+  </>;
 
   return <div className="auth-wrap">
     <div className="auth-card">
       <div className="auth-header">
-        <span className="auth-logo">
-          <img src="/marca/logo_cesta_do_vale_em_estilo_cartum.png" alt="Cesta do Vale" width="240" height="79" />
+        {/* O clique no logo não é um botão de propósito: ele não aparece no foco do teclado nem no leitor de tela */}
+        <span className="auth-logo" onClick={clicarNoLogo}>
+          <img src="/marca/logo_cesta_do_vale_em_estilo_cartum.png" alt="Cesta do Vale" width="240" height="79" draggable="false" />
         </span>
-        <h1>{modo === 'login' ? 'Entrar no sistema' : 'Criar nova conta'}</h1>
-        <p>{modo === 'login' ? 'Digite suas credenciais para acessar sua área.' : 'Cadastre-se como assinante ou produtor da horta.'}</p>
+        <h1>{titulos[modo][0]}</h1>
+        <p>{titulos[modo][1]}</p>
       </div>
 
-      {/* role="tab" e aria-selected dizem ao leitor de tela qual das duas abas está aberta */}
+      {/* role="tab" e aria-selected dizem ao leitor de tela qual das abas está aberta */}
       <div className="auth-tabs" role="tablist">
         <button
           type="button"
           role="tab"
           aria-selected={modo === 'login'}
           className={`auth-tab ${modo === 'login' ? 'active' : ''}`}
-          onClick={() => { setModo('login'); setMensagem(''); }}
+          onClick={() => trocarModo('login')}
         >
           Já tenho conta
         </button>
@@ -374,15 +506,27 @@ function Login({ aoEntrar }) {
           role="tab"
           aria-selected={modo === 'cadastro'}
           className={`auth-tab ${modo === 'cadastro' ? 'active' : ''}`}
-          onClick={() => { setModo('cadastro'); setMensagem(''); }}
+          onClick={() => trocarModo('cadastro')}
         >
           Cadastrar
         </button>
+        {produtorVisivel && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={modo === 'produtor'}
+            className={`auth-tab ${modo === 'produtor' ? 'active' : ''}`}
+            onClick={() => trocarModo('produtor')}
+          >
+            Produtor
+          </button>
+        )}
       </div>
 
       {mensagem && <div className="auth-error" role="alert">{mensagem}</div>}
+      {aviso && <div className="auth-success" role="status">{aviso}</div>}
 
-      {modo === 'login' ? (
+      {modo === 'login' && (
         <form className="auth-form" onSubmit={submeterLogin}>
           <label>
             E-mail
@@ -410,51 +554,48 @@ function Login({ aoEntrar }) {
             {carregando ? 'Entrando...' : 'Entrar no sistema'} <Icone nome="arrow" />
           </button>
         </form>
-      ) : (
+      )}
+
+      {modo === 'cadastro' && (
         <form className="auth-form" onSubmit={submeterCadastro}>
+          {camposDoCadastro}
+          <button className="btn btn-primary" type="submit" disabled={carregando}>
+            {carregando ? 'Cadastrando...' : 'Criar conta e entrar'} <Icone nome="check" />
+          </button>
+        </form>
+      )}
+
+      {modo === 'produtor' && !pedido && (
+        <form className="auth-form" onSubmit={submeterPedido}>
+          {camposDoCadastro}
+          <button className="btn btn-primary" type="submit" disabled={carregando}>
+            {carregando ? 'Enviando...' : 'Solicitar cadastro'} <Icone nome="arrow" />
+          </button>
+        </form>
+      )}
+
+      {modo === 'produtor' && pedido && (
+        <form className="auth-form" onSubmit={submeterCodigo}>
+          <p className="auth-note">Pedido para <strong>{pedido.email}</strong>. Peça o código ao administrador.</p>
           <label>
-            Nome completo
+            Código de ativação (6 dígitos)
             <input
               type="text"
               required
-              minLength={2}
-              maxLength={100}
-              placeholder="Ex.: Aline Silva"
-              value={nome}
-              onChange={(e) => setNome(e.target.value)}
+              inputMode="numeric"
+              pattern="\d{6}"
+              maxLength={6}
+              autoComplete="one-time-code"
+              value={codigo}
+              onChange={(e) => setCodigo(e.target.value.replace(/\D/g, ''))}
             />
           </label>
-          <label>
-            Perfil na horta
-            <select value={tipo} onChange={(e) => setTipo(e.target.value)}>
-              <option value="assinante">Aline · Assinante (pede as cestas)</option>
-              <option value="produtor">Vanderlei · Produtor (separa os produtos)</option>
-            </select>
-          </label>
-          <label>
-            E-mail
-            <input
-              type="email"
-              required
-              maxLength={100}
-              placeholder="seu@email.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </label>
-          <label>
-            Senha (mínimo 8 caracteres)
-            <input
-              type="password"
-              required
-              minLength={8}
-              placeholder="Mínimo 8 caracteres"
-              value={senha}
-              onChange={(e) => setSenha(e.target.value)}
-            />
-          </label>
-          <button className="btn btn-primary" type="submit" disabled={carregando}>
-            {carregando ? 'Cadastrando...' : 'Criar conta e entrar'} <Icone nome="check" />
+          <button className="btn btn-primary" type="submit" disabled={carregando || codigo.length !== 6}>
+            {carregando ? 'Ativando...' : 'Ativar conta'} <Icone nome="check" />
+          </button>
+          <button className="btn btn-secondary" type="button" disabled={carregando}
+            onClick={() => { guardarPedido(null); setMensagem(''); }}>
+            Voltar e pedir de novo
           </button>
         </form>
       )}
@@ -462,7 +603,7 @@ function Login({ aoEntrar }) {
   </div>;
 }
 
-// Tela de Minhas Cestas da Assinante (Aline)
+// Tela de Minhas Cestas da assinante
 function MinhasCestas({ token, navegar, abrirPedido, aoExpirar, versao }) {
   const [cestas, setCestas] = useState([]);
   const [carregando, setCarregando] = useState(true);
@@ -565,7 +706,7 @@ function MinhasCestas({ token, navegar, abrirPedido, aoExpirar, versao }) {
   </section>;
 }
 
-// Tela de Separação do Produtor (Vanderlei)
+// Tela de Separação do produtor
 // A frase padrão quando a IA falha. Um erro do servidor do Vercel nem sempre vem em JSON, então fica aqui também.
 const FALHA_DA_IA = 'Não foi possível gerar a sugestão. Você pode separar manualmente.';
 
@@ -1636,7 +1777,7 @@ export default function App() {
         <span className="section-overline">SEU PEDIDO</span>
         <h2 id="titulo-pedido">Confirmar cesta</h2>
         <p>Escolha o tamanho e confira os detalhes antes de pedir sua cesta semanal.</p>
-        {/* Tela 1 da cartilha: a Aline escolhe o tamanho. Os radio de mesmo name formam um grupo
+        {/* Tela 1 da cartilha: a assinante escolhe o tamanho. Os radio de mesmo name formam um grupo
             em que só um fica marcado; trocar a opção atualiza o tamanhoPedido e o resumo abaixo */}
         {/* O pedido não depende do estoque: o produtor aprova ou recusa depois */}
         <fieldset className="size-picker">

@@ -4,8 +4,9 @@ from modelos.produto import Produto
 from modelos.cesta import Cesta
 from modelos.produto_separado import ProdutoSeparado
 from modelos.estoque import Estoque
+from modelos.solicitacao_produtor import SolicitacaoProdutor
 
-# Os imports registram os cinco modelos (o estoque e o catálogo de produtos vieram depois da cartilha).
+# Os imports registram os seis modelos (o estoque, o catálogo e os pedidos de produtor vieram depois da cartilha).
 if __name__ == "__main__":
     Base.metadata.create_all(bind=engine)
     print(f"Tabelas criadas ou já existentes no banco {engine.url.database}.")
