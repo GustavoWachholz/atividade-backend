@@ -72,8 +72,14 @@ produtor confirmar.
 - **Provedor:** Gemini, no nível gratuito, pelo SDK `google-genai`. Foi escolhido por ter uso gratuito sem
   conta de cobrança. Nesse nível o Google usa o conteúdo para melhorar os produtos, por isso nada da assinante é enviado.
 - **Modelos:** `MODELOS_DA_IA` lista os modelos em ordem (padrão: `gemini-3.5-flash-lite`, depois `gemini-3.1-flash-lite`).
-  Se um estiver sobrecarregado ou demorar mais de 30 s, o seguinte é tentado. A primeira sugestão tem até 60 s, e o
+  Se um estiver sobrecarregado ou demorar mais de 30 s, o seguinte é tentado. A primeira sugestão tem até 90 s, e o
   processo inteiro até 100 s; a correção só acontece se sobrar ao menos 15 s.
+- **Reserva (OpenRouter):** se todos os modelos do Gemini falharem, o pedido vai ao OpenRouter, também com até 30 s,
+  pela API de chat (`httpx`), com o mesmo esquema de resposta em modo estrito e `require_parameters`. O modelo padrão é o
+  gratuito `nvidia/nemotron-3.5-super-vl:free` (`MODELO_DO_OPENROUTER` troca). Gratuito quer dizer limite de uso diário e
+  um provedor que pode guardar o pedido; por isso continua valendo que nada da assinante é enviado. Quando a reserva
+  entra, quase nunca sobra tempo para a correção. Sem `OPENROUTER_API_KEY`, ela fica de fora; sem `CHAVE_DA_IA`, o
+  OpenRouter atende sozinho.
 - **Por que não o 3.8 Flash:** em 2026-11-10 ele estourou os 50 s em produção e levou 83 s numa semana de 10 cestas,
   mesmo com raciocínio baixo. Os Flash-Lite responderam em 3 a 24 s, mas às vezes devolvem 503 por excesso de demanda.
 
@@ -88,6 +94,8 @@ produtor confirmar.
 - `RascunhoDaIa`, na tela `Separacao`, em `frontend/src/App.jsx`.
 - `CHAVE_DA_IA` no `.env`, com o nome nos `.env.exemplo` e no `docker-compose.yml`, lida pelo `configuracao.py`.
   Falta criá-la no projeto do Vercel. A API sobe mesmo sem ela: só o botão falha.
+- `OPENROUTER_API_KEY` (e, opcional, `MODELO_DO_OPENROUTER`) do mesmo jeito, para a reserva. Falta criá-la no `.env` e no
+  projeto do back no Vercel.
 - `maxDuration` de 120 segundos em `backend/vercel.json`, ainda não testado em deploy. ?
 
 ### Em aberto
@@ -105,3 +113,6 @@ O pedido ao modelo está em `INSTRUCOES`, no `servicos/pre_preenchimento.py`.
   falha da IA e tela de celular.
 - **Contra a API real do Gemini:** só as falhas foram testadas (chave inválida e timeout). **A qualidade da sugestão ainda não
   foi testada**, porque falta a chave.
+- **OpenRouter:** em 2026-11-12 os testes com o `httpx` falso cobriram a passagem do Gemini para o OpenRouter, o OpenRouter
+  sozinho, as falhas (429, corpo sem `choices`, JSON inválido, sem rede, timeout) e o prazo esgotado. **Não houve chamada
+  real**: a chave do OpenRouter ainda não existe no `.env`. Falta conferir se o modelo gratuito aceita o esquema estrito.

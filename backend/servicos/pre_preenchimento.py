@@ -4,6 +4,7 @@ import json
 import logging
 import time
 
+import httpx
 from google import genai
 from google.genai import errors as erros_do_gemini
 from google.genai import types
@@ -12,7 +13,7 @@ from google.genai import types
 from google.genai._gaos.lib.compat_errors import GeminiNextGenAPIClientError
 from pydantic import ValidationError
 
-from configuracao import CHAVE_DA_IA, MODELOS_DA_IA
+from configuracao import CHAVE_DA_IA, MODELO_DO_OPENROUTER, MODELOS_DA_IA, OPENROUTER_API_KEY
 from esquemas.pre_preenchimento import SugestaoDoModelo
 from repositorios import cesta as repositorio_cesta
 from repositorios import estoque as repositorio_estoque
@@ -23,9 +24,10 @@ from servicos.excecoes import ConfirmacaoRecusada, IaIndisponivel, NadaParaPreen
 
 registro = logging.getLogger(__name__)
 
-# O tempo do provedor varia muito no nível gratuito. A primeira chamada tem até 60 s (até 30 s por modelo), e o processo inteiro
-# até 100 s, abaixo dos 120 s do maxDuration do vercel.json. A correção só acontece se sobrar tempo.
-TEMPO_LIMITE_SEGUNDOS = 60
+# O tempo do provedor varia muito no nível gratuito. A primeira chamada tem até 90 s (até 30 s por modelo: os dois do
+# Gemini e o do OpenRouter), e o processo inteiro até 100 s, abaixo dos 120 s do maxDuration do vercel.json.
+# A correção só acontece se sobrar tempo, o que quase nunca ocorre quando o OpenRouter precisou entrar.
+TEMPO_LIMITE_SEGUNDOS = 90
 TEMPO_POR_MODELO = 30
 TEMPO_TOTAL_SEGUNDOS = 100
 MINIMO_PARA_CORRIGIR = 15
@@ -120,36 +122,91 @@ def montar_entrada(cestas, espaco, disponivel, nomes):
     }
 
 
-# A única função que fala com o provedor. Devolve os itens como dicionários, ou levanta IaIndisponivel.
-# No nível gratuito, um modelo às vezes fica sobrecarregado (erro 503) enquanto outro responde em segundos.
-# Por isso tenta os modelos de MODELOS_DA_IA em ordem, cada um com até TEMPO_POR_MODELO, sem passar de tempo_limite.
+URL_DO_OPENROUTER = "https://openrouter.ai/api/v1/chat/completions"
+
+# O mesmo formato de SugestaoDoModelo, escrito por extenso para o modo estrito (structured outputs) do OpenRouter,
+# que pede additionalProperties false e não aceita $defs. Um teste confere que os campos batem com o esquema.
+ESQUEMA_DO_OPENROUTER = {
+    "type": "object",
+    "properties": {"itens": {"type": "array", "items": {
+        "type": "object",
+        "properties": {"cesta_id": {"type": "integer"}, "produto_id": {"type": "integer"},
+                       "quantidade": {"type": "integer"}},
+        "required": ["cesta_id", "produto_id", "quantidade"],
+        "additionalProperties": False,
+    }}},
+    "required": ["itens"],
+    "additionalProperties": False,
+}
+
+FALHAS_DO_GEMINI = (GeminiNextGenAPIClientError, erros_do_gemini.APIError,
+                    erros_do_gemini.ContinuationInterruptedError, ValidationError)
+# ValueError cobre o JSON inválido e o ValidationError; KeyError, IndexError e TypeError, uma resposta sem "choices".
+FALHAS_DO_OPENROUTER = (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError)
+
+
 # attempts=1 desliga as repetições automáticas do SDK, que estourariam o tempo da função.
+def cliente_do_gemini():
+    return genai.Client(api_key=CHAVE_DA_IA,
+                        http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=1)))
+
+
 # store=False pede ao Gemini para não guardar a conversa, que aqui não tem continuação.
+def pedir_ao_gemini(cliente, modelo, texto, tempo):
+    resposta = cliente.interactions.create(
+        model=modelo,
+        input=texto,
+        store=False,
+        timeout=tempo,
+        response_format={"type": "text", "mime_type": "application/json",
+                         "schema": SugestaoDoModelo.model_json_schema()},
+    )
+    return SugestaoDoModelo.model_validate_json(resposta.output_text)
+
+
+# require_parameters faz o OpenRouter usar só um provedor que respeite o response_format.
+# Nenhum cabeçalho de identificação vai junto: o pedido leva só a chave e os dados da semana.
+def pedir_ao_openrouter(texto, tempo):
+    resposta = httpx.post(
+        URL_DO_OPENROUTER,
+        headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
+        json={
+            "model": MODELO_DO_OPENROUTER,
+            "messages": [{"role": "user", "content": texto}],
+            "response_format": {"type": "json_schema", "json_schema": {
+                "name": "sugestao", "strict": True, "schema": ESQUEMA_DO_OPENROUTER}},
+            "provider": {"require_parameters": True},
+        },
+        timeout=tempo,
+    )
+    resposta.raise_for_status()
+    return SugestaoDoModelo.model_validate_json(resposta.json()["choices"][0]["message"]["content"])
+
+
+# A única função que fala com os provedores. Devolve os itens como dicionários, ou levanta IaIndisponivel.
+# No nível gratuito, um modelo às vezes fica sobrecarregado (erro 503) enquanto outro responde em segundos.
+# Por isso tenta os modelos de MODELOS_DA_IA em ordem e, se todos falharem, o OpenRouter. Cada tentativa tem
+# até TEMPO_POR_MODELO, sem passar de tempo_limite. Um provedor sem chave fica de fora da lista.
 def chamar_modelo(texto, tempo_limite=TEMPO_LIMITE_SEGUNDOS):
-    if not CHAVE_DA_IA:
-        raise IaIndisponivel(MENSAGEM_DE_FALHA)
-    cliente = genai.Client(api_key=CHAVE_DA_IA,
-                           http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=1)))
+    tentativas = []
+    if CHAVE_DA_IA:
+        cliente = cliente_do_gemini()
+        tentativas += [(modelo, FALHAS_DO_GEMINI,
+                        lambda tempo, modelo=modelo: pedir_ao_gemini(cliente, modelo, texto, tempo))
+                       for modelo in MODELOS_DA_IA]
+    if OPENROUTER_API_KEY:
+        tentativas.append((f"OpenRouter {MODELO_DO_OPENROUTER}", FALHAS_DO_OPENROUTER,
+                           lambda tempo: pedir_ao_openrouter(texto, tempo)))
     prazo = time.monotonic() + tempo_limite
-    for modelo in MODELOS_DA_IA:
+    for nome, falhas, pedir in tentativas:
         restante = prazo - time.monotonic()
         if restante < 5:
             break
         try:
-            resposta = cliente.interactions.create(
-                model=modelo,
-                input=texto,
-                store=False,
-                timeout=min(TEMPO_POR_MODELO, restante),
-                response_format={"type": "text", "mime_type": "application/json",
-                                 "schema": SugestaoDoModelo.model_json_schema()},
-            )
-            sugestao = SugestaoDoModelo.model_validate_json(resposta.output_text)
-            return [item.model_dump() for item in sugestao.itens]
-        except (GeminiNextGenAPIClientError, erros_do_gemini.APIError,
-                erros_do_gemini.ContinuationInterruptedError, ValidationError) as erro:
+            return [item.model_dump() for item in pedir(min(TEMPO_POR_MODELO, restante)).itens]
+        except falhas as erro:
             # Só o modelo e o tipo da falha vão para o log: a mensagem do provedor pode trazer dados do pedido.
-            registro.warning("Falha ao gerar a sugestão com %s: %s", modelo, type(erro).__name__)
+            registro.warning("Falha ao gerar a sugestão com %s: %s", nome, type(erro).__name__)
     raise IaIndisponivel(MENSAGEM_DE_FALHA)
 
 

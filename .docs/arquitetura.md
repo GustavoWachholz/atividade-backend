@@ -68,7 +68,7 @@ O grupo é o valor de `usuarios.tipo`. As permissões ficam em `GRUPOS`, no `seg
 | Camada | Arquivo | O que faz |
 | --- | --- | --- |
 | rota | `rotas/pre_preenchimento.py` | a sugestão (não grava) e a confirmação |
-| serviço | `servicos/pre_preenchimento.py` | `sugerir`, `confirmar`, `conferir_itens` (sem banco) e `chamar_modelo`, a única função que fala com o Gemini |
+| serviço | `servicos/pre_preenchimento.py` | `sugerir`, `confirmar`, `conferir_itens` (sem banco) e `chamar_modelo`, que fala com o Gemini e, se ele falhar, com o OpenRouter |
 | repositório | `salvar_varios` em `produto_separado.py`, `encerrar_leitura` em `cesta.py` | grava num commit só, e solta a conexão antes da chamada ao modelo |
 
 A sugestão não trava nada. Só a confirmação trava a semana, confere de novo e grava.

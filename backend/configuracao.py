@@ -23,6 +23,11 @@ REMETENTE_DO_EMAIL = os.getenv("REMETENTE_DO_EMAIL", "").strip() or "Cesta do Va
 MODELOS_DA_IA = [modelo.strip() for modelo in
                  os.getenv("MODELOS_DA_IA", "gemini-3.5-flash-lite,gemini-3.1-flash-lite").split(",")
                  if modelo.strip()]
+# O OpenRouter entra depois de todos os modelos do Gemini falharem. Sem a chave, ele fica de fora.
+# O modelo padrão é gratuito: tem limite de uso diário, e o provedor pode guardar o pedido
+# (só vão ids, nomes e quantidades de produto e ids e tamanhos de cesta).
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+MODELO_DO_OPENROUTER = os.getenv("MODELO_DO_OPENROUTER", "").strip() or "nvidia/nemotron-3.5-super-vl:free"
 
 
 # obter_configuracao reúne os valores que o seguranca.py precisa sem importar variáveis soltas.

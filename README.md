@@ -33,6 +33,8 @@ Preencha o `.env`:
 | `CHAVE_DO_TOKEN` | a chave que assina os tokens. Gere com `python -c "import secrets; print(secrets.token_hex(32))"` |
 | `URL_DO_BANCO_TESTE` | opcional: um banco vazio terminado em `_teste`, só para o `testar_backend.py` |
 | `CHAVE_DA_IA` | opcional: a chave da API do Gemini, criada no Google AI Studio. Sem ela, só o pré-preenchimento fica indisponível |
+| `OPENROUTER_API_KEY` | opcional: a chave do OpenRouter (openrouter.ai/keys), usada só se todos os modelos do Gemini falharem |
+| `MODELO_DO_OPENROUTER` | opcional: o modelo do OpenRouter. Padrão: `nvidia/nemotron-3.5-super-vl:free` (gratuito) |
 
 Depois, monte o banco (próxima seção) e suba a API:
 
@@ -162,6 +164,7 @@ o usuário foi identificado, mas o grupo dele não tem a permissão, ou a cesta 
 - A sugestão volta como um **rascunho**: nada é gravado até o produtor revisar e clicar em **Confirmar**.
 - O serviço confere cada item contra o limite da cesta e o estoque, na sugestão e de novo na confirmação.
 - O nome e o e-mail da assinante nunca vão para o modelo.
+- Se os dois modelos do Gemini falharem, o pedido vai ao OpenRouter (quando `OPENROUTER_API_KEY` estiver configurada).
 - Se a IA falhar, a tela avisa, e a separação manual continua funcionando.
 
 ## Estrutura

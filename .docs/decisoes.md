@@ -216,7 +216,7 @@
 ## O provedor da IA é o Gemini, no nível gratuito
 - Decisão: os modelos `gemini-3.5-flash-lite` e, se ele falhar, `gemini-3.1-flash-lite`, pelo SDK `google-genai` e pelo `client.interactions`, com a versão do SDK fixa. O `gemini-3.8-flash`, escolhido antes, demorava mais que o limite (ver `ia.md`).
 - Por quê: o custo por uso é baixo nos três provedores, e o Gemini tem uso gratuito sem conta de cobrança. Nesse nível o Google usa o conteúdo para melhorar os produtos, o que pesa pouco aqui: só vão nomes de produtos, quantidades e ids de cestas.
-- Ficou de fora: Claude Haiku 5.5 e OpenAI gpt-6-luna, pagos. O Haiku é o plano B, e trocar é mexer só na `chamar_modelo`.
+- Ficou de fora: Claude Haiku 5.5 e OpenAI gpt-6-luna, pagos. O plano B virou o OpenRouter (decisão abaixo).
 - Onde está: `chamar_modelo` em `servicos/pre_preenchimento.py`. A versão é fixa porque as falhas do `interactions` vêm de um módulo interno do SDK (`GeminiNextGenAPIClientError`), que não herda de `errors.APIError`.
 
 ## O .env.production tem só /api
@@ -297,3 +297,9 @@
 - Segurança: o banco guarda só o hash da senha e o do código (Argon2); o log não registra o código nem o e-mail; o `id` do pedido é um texto aleatório (`secrets.token_urlsafe`); a confirmação trava o pedido (`with_for_update`), e criar o produtor e apagar o pedido acontecem no mesmo commit. Se o e-mail não sair, o pedido é desfeito (503). O e-mail do administrador fica só nas variáveis, porque o repositório é público.
 - Ficou de fora: limite por IP, reenviar o mesmo código, painel de pedidos para o administrador e confirmar o e-mail de quem pede.
 - Onde está: `modelos/solicitacao_produtor.py`, migration `0003_solicitacoes_produtor`, `repositorios/solicitacao_produtor.py`, `servicos/email.py`, `servicos/usuario.py` (`solicitar_produtor`, `confirmar_produtor`), `rotas/usuarios.py`, `Login` em `frontend/src/App.jsx`. O plano está em `.docs/plano-ativacao-produtor.md`.
+
+## A reserva da IA é o OpenRouter, com um modelo gratuito
+- Decisão: se todos os modelos de `MODELOS_DA_IA` falharem, `chamar_modelo` tenta o OpenRouter, com `nvidia/nemotron-3.5-super-vl:free` (trocável em `MODELO_DO_OPENROUTER`), pela API de chat com `httpx`, resposta em JSON com esquema estrito e `require_parameters`. Cada tentativa tem até 30 s; a primeira sugestão passa de 60 para 90 s, e o processo inteiro continua em 100 s.
+- Por quê: os dois modelos do Gemini usam a mesma chave e o mesmo provedor; com a API fora, a chave inválida ou a cota esgotada, os dois caíam juntos. O OpenRouter é outro provedor e outra chave. O modelo gratuito evita custo; ele tem limite diário e o provedor pode guardar o pedido, o que pesa pouco porque só vão ids, nomes e quantidades de produto e ids e tamanhos de cesta.
+- Ficou de fora: modelo pago no OpenRouter, mais de um modelo de reserva e encurtar o tempo dos Gemini. Quando a reserva entra, a correção quase nunca cabe no tempo.
+- Onde está: `configuracao.py` (`OPENROUTER_API_KEY`, `MODELO_DO_OPENROUTER`), `pedir_ao_openrouter` e `chamar_modelo` em `servicos/pre_preenchimento.py`, `ESQUEMA_DO_OPENROUTER` (o mesmo formato do `SugestaoDoModelo`, conferido por teste).

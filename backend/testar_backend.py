@@ -2,6 +2,7 @@ import unittest
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import Mock, patch
 
+import httpx
 import jwt
 
 from fastapi.testclient import TestClient
@@ -1127,18 +1128,20 @@ class TestesPrePreenchimento(unittest.TestCase):
                 servico_ia.sugerir(Mock(), date(2026, 10, 5))
         chamar.assert_not_called()
 
-    # Sem a chave, o botão falha com a mensagem certa, e a API continua de pé.
+    # Sem nenhuma chave, o botão falha com a mensagem certa, e a API continua de pé.
     def test_sem_chave_fica_indisponivel(self):
-        with patch.object(servico_ia, "CHAVE_DA_IA", None):
-            with self.assertRaises(IaIndisponivel):
-                servico_ia.chamar_modelo("pedido")
+        with patch.object(servico_ia, "CHAVE_DA_IA", None), patch.object(servico_ia, "OPENROUTER_API_KEY", ""):
+            with patch.object(servico_ia.httpx, "post") as post:
+                with self.assertRaises(IaIndisponivel):
+                    servico_ia.chamar_modelo("pedido")
+        post.assert_not_called()
 
     # Resposta fora do formato vira IaIndisponivel, e não erro 500.
     def test_json_fora_do_formato_fica_indisponivel(self):
         for texto in ["isto não é json", '{"outra": 1}', None]:
             cliente = Mock()
             cliente.interactions.create.return_value = Mock(output_text=texto)
-            with patch.object(servico_ia, "CHAVE_DA_IA", "chave-falsa"):
+            with patch.object(servico_ia, "CHAVE_DA_IA", "chave-falsa"), patch.object(servico_ia, "OPENROUTER_API_KEY", ""):
                 with patch.object(servico_ia.genai, "Client", return_value=cliente):
                     with self.assertRaises(IaIndisponivel):
                         servico_ia.chamar_modelo("pedido")
@@ -1149,7 +1152,7 @@ class TestesPrePreenchimento(unittest.TestCase):
         cliente.interactions.create.side_effect = [
             Mock(output_text='nao e json'),
             Mock(output_text='{"itens": [{"cesta_id": 1, "produto_id": 1, "quantidade": 2}]}')]
-        with patch.object(servico_ia, "CHAVE_DA_IA", "chave-falsa"):
+        with patch.object(servico_ia, "CHAVE_DA_IA", "chave-falsa"), patch.object(servico_ia, "OPENROUTER_API_KEY", ""):
             with patch.object(servico_ia, "MODELOS_DA_IA", ["modelo-a", "modelo-b"]):
                 with patch.object(servico_ia.genai, "Client", return_value=cliente):
                     itens = servico_ia.chamar_modelo("pedido")
@@ -1158,6 +1161,96 @@ class TestesPrePreenchimento(unittest.TestCase):
         self.assertEqual(usados, ["modelo-a", "modelo-b"])
         self.assertTrue(all(c.kwargs["timeout"] <= servico_ia.TEMPO_POR_MODELO
                             for c in cliente.interactions.create.call_args_list))
+
+    # Uma resposta do OpenRouter, com o conteúdo do jeito que a API de chat devolve.
+    def resposta_do_openrouter(self, conteudo=None, status=200, corpo=None):
+        if corpo is None:
+            corpo = {"choices": [{"message": {"role": "assistant", "content": conteudo}}]}
+        return httpx.Response(status, json=corpo, request=httpx.Request("POST", servico_ia.URL_DO_OPENROUTER))
+
+    # Se todos os modelos do Gemini falharem, o OpenRouter entra, e a resposta dele vale.
+    def test_gemini_fora_passa_para_o_openrouter(self):
+        cliente = Mock()
+        cliente.interactions.create.side_effect = servico_ia.erros_do_gemini.APIError(
+            503, {"error": {"message": "sobrecarregado"}})
+        resposta = self.resposta_do_openrouter('{"itens": [{"cesta_id": 1, "produto_id": 3, "quantidade": 2}]}')
+        with patch.object(servico_ia, "CHAVE_DA_IA", "chave-falsa"), \
+                patch.object(servico_ia, "OPENROUTER_API_KEY", "chave-do-openrouter"), \
+                patch.object(servico_ia, "MODELOS_DA_IA", ["modelo-a", "modelo-b"]), \
+                patch.object(servico_ia.genai, "Client", return_value=cliente), \
+                patch.object(servico_ia.httpx, "post", return_value=resposta) as post:
+            itens = servico_ia.chamar_modelo("pedido")
+        self.assertEqual(itens, [{"cesta_id": 1, "produto_id": 3, "quantidade": 2}])
+        self.assertEqual(cliente.interactions.create.call_count, 2)
+        post.assert_called_once()
+        chamada = post.call_args
+        self.assertEqual(chamada.args[0], servico_ia.URL_DO_OPENROUTER)
+        # Só a chave vai no cabeçalho: nada que identifique a horta ou o produtor.
+        self.assertEqual(chamada.kwargs["headers"], {"Authorization": "Bearer chave-do-openrouter"})
+        self.assertEqual(chamada.kwargs["json"]["model"], servico_ia.MODELO_DO_OPENROUTER)
+        self.assertEqual(chamada.kwargs["json"]["messages"], [{"role": "user", "content": "pedido"}])
+        self.assertTrue(chamada.kwargs["json"]["provider"]["require_parameters"])
+        self.assertLessEqual(chamada.kwargs["timeout"], servico_ia.TEMPO_POR_MODELO)
+
+    # Com o Gemini respondendo, o OpenRouter nem é chamado.
+    def test_gemini_ok_nao_chama_o_openrouter(self):
+        cliente = Mock()
+        cliente.interactions.create.return_value = Mock(output_text='{"itens": []}')
+        with patch.object(servico_ia, "CHAVE_DA_IA", "chave-falsa"), \
+                patch.object(servico_ia, "OPENROUTER_API_KEY", "chave-do-openrouter"), \
+                patch.object(servico_ia.genai, "Client", return_value=cliente), \
+                patch.object(servico_ia.httpx, "post") as post:
+            self.assertEqual(servico_ia.chamar_modelo("pedido"), [])
+        post.assert_not_called()
+
+    # Sem a chave do Gemini, o OpenRouter sozinho atende.
+    def test_so_o_openrouter_configurado(self):
+        resposta = self.resposta_do_openrouter('{"itens": [{"cesta_id": 2, "produto_id": 1, "quantidade": 1}]}')
+        with patch.object(servico_ia, "CHAVE_DA_IA", None), \
+                patch.object(servico_ia, "OPENROUTER_API_KEY", "chave-do-openrouter"), \
+                patch.object(servico_ia.genai, "Client") as cliente, \
+                patch.object(servico_ia.httpx, "post", return_value=resposta):
+            itens = servico_ia.chamar_modelo("pedido")
+        self.assertEqual(itens, [{"cesta_id": 2, "produto_id": 1, "quantidade": 1}])
+        cliente.assert_not_called()
+
+    # Qualquer falha do OpenRouter vira IaIndisponivel, e não erro 500.
+    def test_falhas_do_openrouter_ficam_indisponiveis(self):
+        respostas = [
+            self.resposta_do_openrouter(status=429, corpo={"error": {"message": "limite diário"}}),
+            self.resposta_do_openrouter(status=200, corpo={"error": {"message": "sem provedor"}}),
+            self.resposta_do_openrouter(status=200, corpo={"choices": []}),
+            self.resposta_do_openrouter(None),
+            self.resposta_do_openrouter("isto não é json"),
+            self.resposta_do_openrouter('{"outra": 1}'),
+            httpx.ConnectError("sem rede"),
+            httpx.ReadTimeout("demorou"),
+        ]
+        for resposta in respostas:
+            efeito = {"side_effect": resposta} if isinstance(resposta, Exception) else {"return_value": resposta}
+            with patch.object(servico_ia, "CHAVE_DA_IA", None), \
+                    patch.object(servico_ia, "OPENROUTER_API_KEY", "chave-do-openrouter"), \
+                    patch.object(servico_ia.httpx, "post", **efeito):
+                with self.assertRaises(IaIndisponivel):
+                    servico_ia.chamar_modelo("pedido")
+
+    # Sem tempo sobrando, o OpenRouter não é chamado só para estourar o prazo.
+    def test_sem_tempo_o_openrouter_fica_de_fora(self):
+        with patch.object(servico_ia, "CHAVE_DA_IA", None), \
+                patch.object(servico_ia, "OPENROUTER_API_KEY", "chave-do-openrouter"), \
+                patch.object(servico_ia.httpx, "post") as post:
+            with self.assertRaises(IaIndisponivel):
+                servico_ia.chamar_modelo("pedido", tempo_limite=3)
+        post.assert_not_called()
+
+    # O esquema escrito para o OpenRouter tem os mesmos campos do SugestaoDoModelo.
+    def test_esquema_do_openrouter_bate_com_o_modelo(self):
+        esquema = servico_ia.SugestaoDoModelo.model_json_schema()
+        item = esquema["$defs"]["ItemSugerido"]
+        escrito = servico_ia.ESQUEMA_DO_OPENROUTER
+        self.assertEqual(set(escrito["properties"]), set(esquema["properties"]))
+        self.assertEqual(set(escrito["properties"]["itens"]["items"]["properties"]), set(item["properties"]))
+        self.assertEqual(set(escrito["properties"]["itens"]["items"]["required"]), set(item["required"]))
 
     # A confirmação trava a semana antes de ler e grava num commit só.
     def test_confirmacao_trava_e_grava_uma_vez(self):
