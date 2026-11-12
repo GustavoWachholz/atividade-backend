@@ -48,10 +48,13 @@ dialog{border:1px solid #dce6d4;border-radius:22px;padding:30px 33px 31px;width:
    No computador o dropdown abre ao passar o mouse ou por clique/teclado (.open). Até 940 px vira o botão de menu. */
 .site-header{position:relative;z-index:30;background:#29551e;color:#fff}
 .site-header :focus-visible{outline-color:#fff}
-.topbar{display:flex;align-items:center;gap:32px;min-height:108px}
+/* A barra ocupa a largura da tela: logo e menus na esquerda, usuário e Sair na direita, com 32 px de margem. */
+.container.topbar{width:auto;margin:0;padding-inline:32px}
+.topbar{display:flex;align-items:center;gap:32px;min-height:88px}
 .topbar-brand{flex:0 0 240px;width:240px;padding:0;border:0;background:none;border-radius:10px;transition:transform .2s}
 .topbar-brand:hover{transform:translateY(-2px)}
-.topbar-brand img{width:100%;height:auto}
+/* O PNG tem uns 12 px de transparente em cima e embaixo; a margem negativa deixa a barra com 88 px sem cortar a arte. */
+.topbar-brand img{width:100%;height:auto;margin:-4px 0}
 .topbar-toggle{display:none}
 .topbar-panel{flex:1;display:flex;align-items:center;align-self:stretch;gap:24px;min-width:0}
 .topnav{display:flex;align-self:stretch}
@@ -95,6 +98,7 @@ dialog{border:1px solid #dce6d4;border-radius:22px;padding:30px 33px 31px;width:
   .topnav-dropdown :focus-visible{outline-color:#fff}
   .topbar-actions{margin-left:0;justify-content:space-between;padding-top:12px;border-top:1px solid rgba(255,255,255,.2)}
 }
+@media (max-width:680px){.container.topbar{padding-inline:14px}}
 @media (max-width:380px){.topbar-brand{flex-basis:200px;width:200px}}
 
 /* Tela de login e autenticação com JWT (Aula 08) */
