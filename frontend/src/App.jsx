@@ -241,50 +241,105 @@ function Janela({ aberta, aoFechar, children, classe, titulo }) {
   return <dialog ref={referencia} className={classe} aria-labelledby={titulo} onCancel={aoFechar} onClose={aoFechar}>{children}</dialog>;
 }
 
-// Cabeçalho unificado com dados do usuário logado e botão de sair.
+// O menu de cada perfil. Um item com "itens" vira um menu com dropdown; sem "itens", é um link solto.
+const MENU_DO_PERFIL = {
+  assinante: [
+    { tela: 'inicio', rotulo: 'Início' },
+    { tela: 'cestas', rotulo: 'Minhas cestas' },
+  ],
+  produtor: [
+    { rotulo: 'Cestas', itens: [{ tela: 'separacao', rotulo: 'A separação' }] },
+    { rotulo: 'Cadastros', itens: [{ tela: 'estoque', rotulo: 'O estoque' }, { tela: 'produtos', rotulo: 'Os produtos' }] },
+  ],
+};
+
+// Cabeçalho em uma barra verde: logo, menus e, à direita, o usuário e o Sair.
+// No computador o dropdown abre ao passar o mouse (CSS) e também por clique ou teclado (estado "menuAberto").
+// No celular, o botão de menu mostra um painel com os menus já abertos, o usuário e o Sair.
 function Cabecalho({ usuario, aoSair, navegar, telaAtual }) {
   const nomePerfil = usuario.tipo === 'assinante' ? 'Assinante' : 'Produtor';
-  return <header className="site-header" id="topo">
+  const menu = MENU_DO_PERFIL[usuario.tipo] ?? [];
+  const [menuAberto, setMenuAberto] = useState(null);
+  const [painelAberto, setPainelAberto] = useState(false);
+  const referencia = useRef(null);
+
+  // Fecha o dropdown e o painel ao clicar fora do cabeçalho ou apertar Esc.
+  useEffect(() => {
+    if (menuAberto === null && !painelAberto) return undefined;
+    const aoClicar = (evento) => {
+      if (!referencia.current?.contains(evento.target)) { setMenuAberto(null); setPainelAberto(false); }
+    };
+    const aoTeclar = (evento) => {
+      if (evento.key === 'Escape') { setMenuAberto(null); setPainelAberto(false); }
+    };
+    document.addEventListener('mousedown', aoClicar);
+    document.addEventListener('keydown', aoTeclar);
+    return () => {
+      document.removeEventListener('mousedown', aoClicar);
+      document.removeEventListener('keydown', aoTeclar);
+    };
+  }, [menuAberto, painelAberto]);
+
+  const irPara = (tela) => {
+    setMenuAberto(null);
+    setPainelAberto(false);
+    navegar(tela);
+  };
+
+  return <header className="site-header" id="topo" ref={referencia}>
     <a className="skip-link" href="#conteudo">Pular para o conteúdo</a>
-    <div className="announcement">
-      <div className="container announcement-inner">
-        <span><Icone nome="leaf" /> COLHEITA DA SEMANA</span>
-        <span className="announcement-note">Uma horta comunitária, feita com cuidado</span>
-      </div>
-    </div>
-    <div className="container header-main">
-      <button className="brand-plate" type="button" onClick={() => navegar('inicio')} aria-label="Cesta do Vale, voltar para o início">
-        <img src="/marca/logo_cesta_do_vale_em_estilo_cartum.png" alt="Cesta do Vale" width="262" height="86" />
+    <div className="container topbar">
+      <button className="topbar-brand" type="button" onClick={() => irPara('inicio')} aria-label="Cesta do Vale, voltar para o início">
+        <img src="/marca/logo_cesta_do_vale_em_estilo_cartum.png" alt="Cesta do Vale" width="240" height="96" />
       </button>
-      <div className="header-actions">
-        <div className="user-badge">
-          <Icone nome="user" />
-          <span><strong>{usuario.nome}</strong> · {nomePerfil}</span>
+      <button className="topbar-toggle" type="button" aria-expanded={painelAberto} aria-controls="menu-principal"
+        onClick={() => setPainelAberto((aberto) => !aberto)}>
+        <Icone nome={painelAberto ? 'x' : 'menu'} rotulo={painelAberto ? 'Fechar o menu' : 'Abrir o menu'} />
+      </button>
+      <div className={`topbar-panel ${painelAberto ? 'open' : ''}`} id="menu-principal">
+        <nav className="topnav" aria-label="Navegação principal">
+          <ul className="topnav-list">
+            {menu.map((entrada) => {
+              if (!entrada.itens) {
+                return <li key={entrada.tela}>
+                  <button type="button" className={`topnav-link ${telaAtual === entrada.tela ? 'active' : ''}`}
+                    aria-current={telaAtual === entrada.tela ? 'page' : undefined} onClick={() => irPara(entrada.tela)}>
+                    {entrada.rotulo}
+                  </button>
+                </li>;
+              }
+              const aberto = menuAberto === entrada.rotulo;
+              const ativo = entrada.itens.some((item) => item.tela === telaAtual);
+              const idDoMenu = `menu-${entrada.rotulo.toLowerCase()}`;
+              return <li key={entrada.rotulo} className={`topnav-menu ${aberto ? 'open' : ''}`}
+                onMouseLeave={() => { if (aberto) setMenuAberto(null); }}>
+                <button type="button" className={`topnav-link ${ativo ? 'active' : ''}`} aria-expanded={aberto} aria-controls={idDoMenu}
+                  onClick={() => setMenuAberto(aberto ? null : entrada.rotulo)}>
+                  {entrada.rotulo} <Icone nome="chevron" />
+                </button>
+                <ul className="topnav-dropdown" id={idDoMenu}>
+                  {entrada.itens.map((item) => <li key={item.tela}>
+                    <button type="button" className={telaAtual === item.tela ? 'active' : ''}
+                      aria-current={telaAtual === item.tela ? 'page' : undefined} onClick={() => irPara(item.tela)}>
+                      {item.rotulo}
+                    </button>
+                  </li>)}
+                </ul>
+              </li>;
+            })}
+          </ul>
+        </nav>
+        <div className="topbar-actions">
+          <div className="user-badge">
+            <Icone nome="user" />
+            <span><strong>{usuario.nome}</strong> · {nomePerfil}</span>
+          </div>
+          <button className="btn-logout" type="button" onClick={aoSair} aria-label="Sair da conta">
+            Sair
+          </button>
         </div>
-        <button className="btn-logout" type="button" onClick={aoSair} aria-label="Sair da conta">
-          Sair
-        </button>
       </div>
     </div>
-    <nav className="primary-nav" aria-label="Navegação principal">
-      <div className="container nav-inner">
-        <div className="nav-links">
-          {usuario.tipo === 'assinante' && (
-            <>
-              <button type="button" className={`nav-link ${telaAtual === 'inicio' ? 'active' : ''}`} onClick={() => navegar('inicio')}>Início</button>
-              <button type="button" className={`nav-link ${telaAtual === 'cestas' ? 'active' : ''}`} onClick={() => navegar('cestas')}>Minhas cestas</button>
-            </>
-          )}
-          {usuario.tipo === 'produtor' && (
-            <>
-              <button type="button" className={`nav-link ${telaAtual === 'separacao' ? 'active' : ''}`} onClick={() => navegar('separacao')}>A separação</button>
-              <button type="button" className={`nav-link ${telaAtual === 'estoque' ? 'active' : ''}`} onClick={() => navegar('estoque')}>O estoque</button>
-              <button type="button" className={`nav-link ${telaAtual === 'produtos' ? 'active' : ''}`} onClick={() => navegar('produtos')}>Os produtos</button>
-            </>
-          )}
-        </div>
-      </div>
-    </nav>
   </header>;
 }
 
