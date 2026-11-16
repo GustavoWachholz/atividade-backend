@@ -808,7 +808,14 @@ function MinhasCestas({ token, navegar, abrirPedido, aoExpirar, aoAvisar, versao
   const mudarFiltro = (setFiltro) => (valor) => { setFiltro(valor); setPagina(1); };
   const limparFiltros = () => { setSituacao(''); setTamanho(''); setSemana(''); setPagina(1); };
 
+  // Número da busca mais recente. Trocar o filtro rápido dispara várias buscas, e a resposta de uma
+  // busca antiga pode chegar depois (no Vercel, a primeira costuma demorar mais) e cobrir a lista filtrada.
+  // Só a resposta da busca mais recente entra na tela.
+  const ultimaBusca = useRef(0);
+
   const carregarCestas = () => {
+    const estaBusca = ++ultimaBusca.current;
+    const atual = () => estaBusca === ultimaBusca.current;
     setCarregando(true);
     setErro('');   // limpa o erro da busca anterior
     const filtros = new URLSearchParams({ pagina });
@@ -825,15 +832,20 @@ function MinhasCestas({ token, navegar, abrirPedido, aoExpirar, aoAvisar, versao
         return res.json();
       })
       .then((lista) => {
-        setCestas(lista);
-        return buscarProdutosDasCestas(token, lista);
+        if (!atual()) return null;
+        // A lista e os produtos entram juntos, para a cesta nova não aparecer com os produtos da antiga
+        return buscarProdutosDasCestas(token, lista).then((produtos) => [lista, produtos]);
       })
-      .then(setProdutosPorCesta)
-      .catch((err) => setErro(err.message))
-      .finally(() => setCarregando(false));
+      .then((resultado) => {
+        if (!resultado || !atual()) return;
+        setCestas(resultado[0]);
+        setProdutosPorCesta(resultado[1]);
+      })
+      .catch((err) => { if (atual()) setErro(err.message); })
+      .finally(() => { if (atual()) setCarregando(false); });
   };
 
-  // Busca de novo quando o token muda ou quando o App avisa que algo foi gravado (versao)
+  // Busca de novo quando o token muda, um filtro muda ou o App avisa que algo foi gravado (versao)
   useEffect(() => {
     carregarCestas();
   }, [token, versao, pagina, situacao, tamanho, semana]);
