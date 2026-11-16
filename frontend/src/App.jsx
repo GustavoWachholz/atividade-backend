@@ -246,6 +246,7 @@ const MENU_DO_PERFIL = {
   assinante: [
     { tela: 'inicio', rotulo: 'Início' },
     { tela: 'cestas', rotulo: 'Minhas cestas' },
+    { tela: 'preferencias', rotulo: 'Preferências' },
   ],
   produtor: [
     { rotulo: 'Cestas', itens: [{ tela: 'separacao', rotulo: 'A separação' }] },
@@ -658,6 +659,113 @@ function Login({ aoEntrar }) {
   </div>;
 }
 
+// As três opções de cada produto nas preferências. tanto_faz é o padrão e não guarda nada no back.
+const OPCOES_DE_PREFERENCIA = [
+  { valor: 'quero', rotulo: 'Quero' },
+  { valor: 'tanto_faz', rotulo: 'Tanto faz' },
+  { valor: 'nao_quero', rotulo: 'Não quero' },
+];
+
+// GET /preferencias (sem corpo) ou PUT /preferencias/{id}. As duas devolvem a lista inteira atualizada.
+function chamarPreferencias(token, aoExpirar, produtoId, preferencia) {
+  const gravar = produtoId !== undefined;
+  return fetch(`${URL_DA_API}/preferencias${gravar ? `/${produtoId}` : ''}`, {
+    method: gravar ? 'PUT' : 'GET',
+    headers: { Authorization: 'Bearer ' + token, ...(gravar ? { 'Content-Type': 'application/json' } : {}) },
+    body: gravar ? JSON.stringify({ preferencia }) : undefined
+  }).then(async (res) => {
+    if (res.status === 401) { aoExpirar(); throw new Error('Sua sessão expirou. Entre de novo.'); }
+    if (!res.ok) throw new Error(await erroDaResposta(res, gravar ? 'Não foi possível salvar a preferência.' : 'Não foi possível carregar as preferências.'));
+    return res.json();
+  });
+}
+
+// As preferências da dona de uma cesta, para o produtor: { quer: [ids], nao_quer: [ids] }.
+// Se a busca falhar, a separação segue sem as marcações: o back confere de novo ao gravar.
+function buscarPreferenciasDaCesta(token, cestaId) {
+  return fetch(`${URL_DA_API}/cestas/${cestaId}/preferencias`, { headers: { Authorization: 'Bearer ' + token } })
+    .then((res) => (res.ok ? res.json() : { quer: [], nao_quer: [] }))
+    .catch(() => ({ quer: [], nao_quer: [] }));
+}
+
+// Tela de Preferências da assinante: cada produto do estoque com Quero, Tanto faz ou Não quero.
+// Cada clique grava na hora; a lista que volta do back substitui a da tela.
+function Preferencias({ token, navegar, aoExpirar }) {
+  const [produtos, setProdutos] = useState(null);
+  const [erro, setErro] = useState('');
+  // Id do produto com um PUT em andamento, para desligar as opções dele.
+  const [salvando, setSalvando] = useState(null);
+
+  useEffect(() => {
+    chamarPreferencias(token, aoExpirar).then(setProdutos).catch((err) => setErro(err.message));
+  }, [token]);
+
+  const marcar = (produto, preferencia) => {
+    if (produto.preferencia === preferencia) return;
+    setErro('');
+    setSalvando(produto.produto_id);
+    // Mostra a escolha na hora; se o back recusar, volta ao que estava.
+    const anterior = produtos;
+    setProdutos(produtos.map((p) => (p.produto_id === produto.produto_id ? { ...p, preferencia } : p)));
+    chamarPreferencias(token, aoExpirar, produto.produto_id, preferencia)
+      .then(setProdutos)
+      .catch((err) => { setProdutos(anterior); setErro(err.message); })
+      .finally(() => setSalvando(null));
+  };
+
+  const contar = (valor) => (produtos || []).filter((p) => p.preferencia === valor).length;
+
+  return <section className="container workspace page" aria-labelledby="titulo-preferencias">
+    <div className="workspace-heading">
+      <div>
+        <button className="back-link" type="button" onClick={() => navegar('inicio')}>
+          <Icone nome="left" /> Voltar para o início
+        </button>
+        <span className="section-overline">SUA ÁREA</span>
+        <h1 id="titulo-preferencias">Minhas <span>preferências</span></h1>
+        <p>Marque o que você quer ou não quer receber. O produtor coloca primeiro o que você quer, quando há estoque, e nunca coloca o que você não quer.</p>
+      </div>
+    </div>
+
+    {erro && <div className="dialog-error" role="alert">{erro}</div>}
+
+    {!produtos ? (
+      !erro && <p>Carregando os produtos...</p>
+    ) : produtos.length ? <>
+      <p className="pref-summary" aria-live="polite">
+        <span><strong>{contar('quero')}</strong> que você quer</span>
+        <span><strong>{contar('nao_quero')}</strong> que você não quer</span>
+        <span>As mudanças são salvas na hora e valem para as próximas cestas.</span>
+      </p>
+      <ul className="pref-list">
+        {produtos.map((produto) => (
+          <li key={produto.produto_id} className={`pref-item pref-${produto.preferencia}`}>
+            <fieldset disabled={salvando === produto.produto_id}>
+              <legend>{produto.nome_produto}</legend>
+              <div className="pref-options">
+                {OPCOES_DE_PREFERENCIA.map((opcao) => (
+                  <label key={opcao.valor} className={`pref-option pref-option-${opcao.valor}`}>
+                    <input type="radio" name={`pref-${produto.produto_id}`} value={opcao.valor}
+                      checked={produto.preferencia === opcao.valor}
+                      onChange={() => marcar(produto, opcao.valor)} />
+                    <span>{opcao.rotulo}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          </li>
+        ))}
+      </ul>
+    </> : (
+      <div className="empty-workspace">
+        <Icone nome="leaf" />
+        <h3>Ainda não há produtos no estoque.</h3>
+        <p>Quando o produtor registrar a primeira colheita, os produtos aparecem aqui para você marcar.</p>
+      </div>
+    )}
+  </section>;
+}
+
 // Tela de Minhas Cestas da assinante
 function MinhasCestas({ token, navegar, abrirPedido, aoExpirar, versao }) {
   const [cestas, setCestas] = useState([]);
@@ -867,11 +975,16 @@ function RascunhoDaIa({ rascunho, setRascunho, aoConfirmar, aoDescartar, confirm
       {cestas.map((cesta) => {
         const soma = somarCesta(cesta);
         const estourada = soma > cesta.espaco_livre;
-        const opcoes = estoque.filter((produto) => sobra(produto) > 0
+        const naoQuer = cesta.nao_quer || [];
+        const opcoes = estoque.filter((produto) => sobra(produto) > 0 && !naoQuer.includes(produto.produto_id)
           && !cesta.itens.some((item) => item.produto_id === produto.produto_id));
+        const nomes = (ids) => estoque.filter((produto) => (ids || []).includes(produto.produto_id))
+          .map((produto) => produto.nome_produto).join(', ');
         return <article className="producer-entry" key={cesta.cesta_id}>
           <h3 className="entry-title">Cesta {tamanhos[cesta.tamanho]?.nome.toLowerCase()} #{cesta.cesta_id}</h3>
           <p className="entry-person">Assinante: <strong>{cesta.assinante}</strong></p>
+          {nomes(cesta.quer) && <p className="entry-person">Quer: {nomes(cesta.quer)}</p>}
+          {nomes(cesta.nao_quer) && <p className="entry-person">Não quer: {nomes(cesta.nao_quer)}</p>}
           <p className={estourada ? 'draft-capacity draft-capacity-over' : 'draft-capacity'}>
             {soma} de {cesta.espaco_livre} {cesta.espaco_livre === 1 ? 'espaço livre usado' : 'espaços livres usados'}
           </p>
@@ -1443,6 +1556,7 @@ function Rodape({ navegar, usuario }) {
         {usuario.tipo === 'assinante' ? <>
           <button type="button" onClick={() => navegar('inicio')}>Início</button>
           <button type="button" onClick={() => navegar('cestas')}>Minhas cestas</button>
+          <button type="button" onClick={() => navegar('preferencias')}>Preferências</button>
         </> : <>
           <button type="button" onClick={() => navegar('separacao')}>A separação</button>
           <button type="button" onClick={() => navegar('estoque')}>O estoque</button>
@@ -1559,6 +1673,7 @@ function FormularioDeProduto({ cesta, token, aoExpirar, aoCancelar, aoSalvar }) 
   const [erro, setErro] = useState('');
   const [salvando, setSalvando] = useState(false);
   const [estoque, setEstoque] = useState(null);
+  const [preferencias, setPreferencias] = useState({ quer: [], nao_quer: [] });
 
   // O estoque é o da semana da cesta, que pode não ser a semana atual
   useEffect(() => {
@@ -1567,9 +1682,22 @@ function FormularioDeProduto({ cesta, token, aoExpirar, aoCancelar, aoSalvar }) 
       .catch((err) => setErro(err.message));
   }, [token, cesta.semana]);
 
+  // O que a dona da cesta marcou nas preferências
+  useEffect(() => {
+    buscarPreferenciasDaCesta(token, cesta.id).then(setPreferencias);
+  }, [token, cesta.id]);
+
   const limite = tamanhos[cesta.tamanho]?.limite || 5;
   const restante = Math.max(0, limite - itensSeparados(cesta));
-  const produtosDisponiveis = estoque ? estoque.itens.filter((item) => item.disponivel > 0) : [];
+  // O que a assinante não quer fica fora da lista; o que ela quer vem primeiro.
+  const querido = (item) => preferencias.quer.includes(item.produto_id);
+  const produtosDisponiveis = estoque
+    ? estoque.itens.filter((item) => item.disponivel > 0 && !preferencias.nao_quer.includes(item.produto_id))
+      .sort((a, b) => Number(querido(b)) - Number(querido(a)))
+    : [];
+  const nomesDoEstoque = (ids) => (estoque ? estoque.itens.filter((item) => ids.includes(item.produto_id)).map((item) => item.nome_produto) : []);
+  const queridos = nomesDoEstoque(preferencias.quer);
+  const recusados = nomesDoEstoque(preferencias.nao_quer);
   const escolhido = produtosDisponiveis.find((item) => String(item.produto_id) === produtoId);
   // A quantidade respeita as duas regras: o que cabe na cesta e o que sobrou do produto
   const maximo = escolhido ? Math.min(restante, escolhido.disponivel) : restante;
@@ -1612,6 +1740,12 @@ function FormularioDeProduto({ cesta, token, aoExpirar, aoCancelar, aoSalvar }) 
     <span className="section-overline">REGISTRO DO PRODUTOR</span>
     <h2 id="titulo-fechamento">Separar produto na cesta #{cesta.id}</h2>
     <div className="remaining-box">{textoCapacidade(cesta)}</div>
+    {(queridos.length > 0 || recusados.length > 0) && (
+      <div className="pref-note">
+        {queridos.length > 0 && <p><strong>A assinante quer:</strong> {queridos.join(', ')}</p>}
+        {recusados.length > 0 && <p><strong>Não quer (fora da lista):</strong> {recusados.join(', ')}</p>}
+      </div>
+    )}
     <form id="produce-form" onSubmit={submeter}>
       <label htmlFor="nome-produto">Produto do estoque da semana</label>
       {/* O select só lista o que foi colhido na semana da cesta e ainda tem unidades */}
@@ -1626,7 +1760,7 @@ function FormularioDeProduto({ cesta, token, aoExpirar, aoCancelar, aoSalvar }) 
         </option>
         {produtosDisponiveis.map((item) => (
           <option key={item.produto_id} value={item.produto_id}>
-            {item.nome_produto} · {item.disponivel} disponíveis
+            {querido(item) ? '★ ' : ''}{item.nome_produto} · {item.disponivel} disponíveis
           </option>
         ))}
       </select>
@@ -1816,6 +1950,7 @@ export default function App() {
         <>
           {tela === 'inicio' && <Inicio pedir={setTamanhoPedido} navegar={setTela} />}
           {tela === 'cestas' && <MinhasCestas token={token} navegar={setTela} abrirPedido={() => setTamanhoPedido('media')} aoExpirar={sair} versao={versao} />}
+          {tela === 'preferencias' && <Preferencias token={token} navegar={setTela} aoExpirar={sair} />}
         </>
       )}
     </main>
@@ -1865,7 +2000,7 @@ export default function App() {
           ) : (
             <p className="dialog-hint">O produtor ainda não registrou a colheita desta semana.</p>
           )}
-          <p className="dialog-hint">Os produtos são escolhidos pelo produtor na montagem da cesta.</p>
+          <p className="dialog-hint">Os produtos são escolhidos pelo produtor na montagem da cesta, respeitando as suas <button type="button" className="text-link inline-link" onClick={() => { setTamanhoPedido(null); setTela('preferencias'); }}>preferências</button>.</p>
         </div>
         {erroPedido && <p className="dialog-error" role="alert">{erroPedido}</p>}
         <div className="order-summary">

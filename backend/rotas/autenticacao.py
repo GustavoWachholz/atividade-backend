@@ -119,4 +119,11 @@ def exigir_editar_catalogo(usuario=Depends(obter_usuario_atual)):
     if not tem_permissao(usuario, "catalogo:editar"):
         raise HTTPException(status_code=403, detail="Seu grupo não pode editar o catálogo")
     return usuario
+
+
+# GET e PUT /preferencias: só a assinante marca o que quer ou não receber na cesta.
+def exigir_editar_preferencias(usuario=Depends(obter_usuario_atual)):
+    if not tem_permissao(usuario, "preferencias:editar"):
+        raise HTTPException(status_code=403, detail="Seu grupo não tem preferências de cesta")
+    return usuario
 # ─── [FIM NOVO · grupos] ─────────────────────────────────────────────────────────────────

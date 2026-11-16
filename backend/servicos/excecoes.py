@@ -67,3 +67,11 @@ class NadaParaPreencher(Exception):
 
 class ConfirmacaoRecusada(Exception):
     """Um item do rascunho conflita com a cesta ou com o estoque, e nada foi gravado."""
+
+
+class ProdutoNaoQuerido(Exception):
+    """A assinante marcou nas preferências que não quer receber este produto."""
+
+
+class ProdutoForaDasPreferencias(Exception):
+    """O produto não está entre os do estoque que a assinante pode marcar."""

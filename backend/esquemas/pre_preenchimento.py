@@ -38,6 +38,8 @@ class CestaDoRascunho(BaseModel):
     tamanho: TamanhoCesta
     assinante: str
     espaco_livre: int = Field(description="Quanto cabe além do que já foi gravado na cesta")
+    quer: list[int] = Field(default=[], description="Ids dos produtos que a assinante quer receber")
+    nao_quer: list[int] = Field(default=[], description="Ids dos produtos que a assinante não quer receber")
     itens: list[ItemDoRascunho]
 
 

@@ -228,3 +228,30 @@ dialog{border:1px solid #dce6d4;border-radius:22px;padding:30px 33px 31px;width:
 /* Ativação do produtor: aviso de conta criada e a linha que diz para qual e-mail é o pedido */
 .auth-success{background:#eef7e8;border:1px solid #c9e6bd;color:#1d4f17;padding:11px 14px;border-radius:10px;font-size:13px;font-weight:700}
 .auth-note{margin:0;font-size:13px;color:#55664d}
+
+/* Preferências da assinante: cada produto com Quero, Tanto faz e Não quero */
+.pref-summary{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center;font-size:14px;color:var(--text-secondary);margin:0 0 18px}
+.pref-summary strong{color:var(--action-primary);font-size:16px}
+.pref-summary span:last-child{flex-basis:100%;font-size:13px}
+.pref-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.pref-item{background:var(--surface-base);border:1px solid #e5e8df;border-radius:var(--radius-card);padding:14px 16px;box-shadow:var(--shadow-card);min-width:0}
+.pref-item.pref-quero{border-color:#a9cf93;background:#f6fbf1}
+.pref-item.pref-nao_quero{border-color:#e7c3bd;background:#fdf6f4}
+.pref-item fieldset{border:0;margin:0;padding:0;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;min-width:0}
+.pref-item fieldset:disabled{opacity:.6}
+.pref-item legend{float:left;font-family:var(--font-heading);font-size:19px;color:#2b4523;padding:0;overflow-wrap:anywhere}
+.pref-options{display:inline-flex;background:#f2f4ee;border-radius:999px;padding:3px;gap:2px}
+.pref-option{position:relative;display:inline-flex}
+.pref-option input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}
+.pref-option span{display:inline-flex;align-items:center;min-height:40px;padding:0 13px;border-radius:999px;font-size:13px;font-weight:800;color:var(--text-secondary);white-space:nowrap}
+.pref-option input:focus-visible+span{box-shadow:var(--focus-ring)}
+.pref-option-quero input:checked+span{background:var(--action-primary);color:#fff}
+.pref-option-tanto_faz input:checked+span{background:#fff;color:var(--text-primary);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.pref-option-nao_quero input:checked+span{background:var(--feedback-error);color:#fff}
+.pref-note{background:var(--surface-soft-green);border-radius:12px;padding:10px 14px;margin:0 0 14px;font-size:13px;color:#2d5222}
+.pref-note p{margin:2px 0}
+.text-link.inline-link{display:inline;min-height:0;padding:0;background:none;border:0;font:inherit;color:var(--action-primary);text-decoration:underline;cursor:pointer}
+@media (max-width:940px){.pref-list{grid-template-columns:1fr}}
+@media (max-width:420px){.pref-item fieldset{flex-direction:column;align-items:stretch}.pref-options{display:flex}.pref-option{flex:1}.pref-option span{width:100%;justify-content:center;padding:0 6px}}
+/* O link de voltar fica na própria linha, acima do "SUA ÁREA", e não ao lado dele */
+.back-link{display:flex;width:fit-content}

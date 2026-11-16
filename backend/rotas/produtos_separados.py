@@ -6,7 +6,8 @@ from esquemas.produto_separado import ProdutoSeparadoCriacao, ProdutoSeparadoRes
 from rotas.autenticacao import exigir_separar_produto  # [NOVO · grupos] substitui exigir_produtor
 from rotas.cestas import cesta_existente
 from servicos import produto_separado as servico_produto
-from servicos.excecoes import CestaNaoEmSeparacao, EstoqueInsuficiente, LimiteDaCestaExcedido
+from esquemas.preferencia import PreferenciasDaCesta
+from servicos.excecoes import CestaNaoEmSeparacao, EstoqueInsuficiente, LimiteDaCestaExcedido, ProdutoNaoQuerido
 
 router = APIRouter(prefix="/cestas", tags=["Produtos separados"])
 
@@ -19,7 +20,7 @@ router = APIRouter(prefix="/cestas", tags=["Produtos separados"])
              responses={401: {"description": "Sem token, ou token inválido ou vencido"},
                         403: {"description": "O grupo de quem está logado não tem a permissão produtos:separar"},
                         404: {"description": "A cesta não existe"},
-                        409: {"description": "A cesta não está em separação, a quantidade passa do limite dela, ou do que sobrou do produto no estoque da semana"}})
+                        409: {"description": "A cesta não está em separação, a quantidade passa do limite dela, ou do que sobrou do produto no estoque da semana, ou a assinante não quer o produto"}})
 def separar_produto(dados: ProdutoSeparadoCriacao, usuario=Depends(exigir_separar_produto),
                     cesta=Depends(cesta_existente),
                     sessao: Session = Depends(obter_sessao)):
@@ -32,6 +33,8 @@ def separar_produto(dados: ProdutoSeparadoCriacao, usuario=Depends(exigir_separa
         raise HTTPException(status_code=409, detail=str(erro))
     except EstoqueInsuficiente as erro:
         raise HTTPException(status_code=409, detail=str(erro))
+    except ProdutoNaoQuerido as erro:
+        raise HTTPException(status_code=409, detail=str(erro))
 
 
 # O produtor vê os produtos de qualquer cesta; a assinante, só os da cesta dela.
@@ -43,3 +46,15 @@ def separar_produto(dados: ProdutoSeparadoCriacao, usuario=Depends(exigir_separa
 def listar_produtos(cesta=Depends(cesta_existente)):
     """Lista o que o produtor já separou na cesta."""
     return servico_produto.listar_por_cesta(cesta)
+
+
+# O fechamento mostra ao produtor o que a dona da cesta quer e não quer receber.
+@router.get("/{cesta_id}/preferencias", response_model=PreferenciasDaCesta,
+            summary="Mostrar as preferências da dona da cesta",
+            responses={401: {"description": "Sem token, ou token inválido ou vencido"},
+                       403: {"description": "Sem a permissão cestas:ver, ou a cesta é de outra assinante"},
+                       404: {"description": "A cesta não existe"}})
+def preferencias_da_cesta(cesta=Depends(cesta_existente), sessao: Session = Depends(obter_sessao)):
+    """Os ids dos produtos marcados como quero e como não quero."""
+    preferencias = servico_produto.preferencias_da_cesta(sessao, cesta)
+    return {"quer": sorted(preferencias["quer"]), "nao_quer": sorted(preferencias["nao_quer"])}

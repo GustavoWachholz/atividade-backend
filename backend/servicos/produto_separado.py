@@ -1,13 +1,19 @@
 from repositorios import estoque as repositorio_estoque
 from repositorios import produto_separado as repositorio_produto
+from servicos import preferencia as servico_preferencia
 from servicos.cesta import LIMITES, segunda_da_semana
 from servicos.estoque import disponivel_do_produto
-from servicos.excecoes import CestaNaoEmSeparacao, EstoqueInsuficiente, LimiteDaCestaExcedido
+from servicos.excecoes import CestaNaoEmSeparacao, EstoqueInsuficiente, LimiteDaCestaExcedido, ProdutoNaoQuerido
 
 
 # A cesta chega já conferida pela rota (existe e pode ser vista por quem pediu).
 def listar_por_cesta(cesta):
     return cesta.produtos_separados
+
+
+# O que a dona da cesta quer e não quer receber, para o produtor ver no fechamento.
+def preferencias_da_cesta(sessao, cesta):
+    return servico_preferencia.das_assinantes(sessao, [cesta.assinante_id])[cesta.assinante_id]
 
 
 # A cesta precisa estar em separação, ou seja, já aprovada pelo produtor e ainda não concluída.
@@ -33,5 +39,8 @@ def separar(sessao, cesta, dados):
     if dados.quantidade > disponivel:
         raise EstoqueInsuficiente(
             f"Não há {estoque.nome_produto} suficiente no estoque. Restam só {disponivel} unidades.")
+    # O que a assinante marcou como "não quero" nas preferências não entra na cesta dela.
+    if dados.produto_id in preferencias_da_cesta(sessao, cesta)["nao_quer"]:
+        raise ProdutoNaoQuerido(f"A assinante marcou que não quer receber {estoque.nome_produto}.")
     # Grava só o id do catálogo: o nome é lido de lá, igual em todas as semanas.
     return repositorio_produto.salvar(sessao, cesta.id, dados.model_dump())

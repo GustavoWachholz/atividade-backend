@@ -8,6 +8,7 @@ from modelos.cesta import Cesta
 from modelos.produto_separado import ProdutoSeparado
 from modelos.estoque import Estoque
 from modelos.solicitacao_produtor import SolicitacaoProdutor
+from modelos.preferencia import Preferencia
 
 # context é fornecido pelo Alembic e entrega a configuração do alembic.ini.
 config = context.config
@@ -16,7 +17,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Os imports registram as seis tabelas (o estoque, o catálogo e os pedidos de produtor vieram depois) para o autogenerate enxergar cada uma.
+# Os imports registram as sete tabelas (o estoque, o catálogo, os pedidos de produtor e as preferências vieram depois) para o autogenerate enxergar cada uma.
 target_metadata = Base.metadata
 
 # O modo sem conexão usa a URL para gerar comandos, sem acessar o banco.

@@ -47,6 +47,7 @@ A trava é solta no commit, ou quando a sessão fecha sem commit (recusa).
 | `estoque:ver` | `GET /estoques` | sim | sim |
 | `catalogo:ver` | `GET /produtos` | sim | sim |
 | `catalogo:editar` | `POST /produtos` e `PATCH /produtos/{id}` | não | sim |
+| `preferencias:editar` | `GET /preferencias` e `PUT /preferencias/{produto_id}` | sim | não |
 
 O grupo é o valor de `usuarios.tipo`. As permissões ficam em `GRUPOS`, no `seguranca.py`.
 
@@ -62,6 +63,23 @@ O grupo é o valor de `usuarios.tipo`. As permissões ficam em `GRUPOS`, no `seg
 | serviço | `servicos/produto_separado.py` | `separar` confere o limite da cesta e depois o estoque do produto |
 | repositório | `repositorios/estoque.py`, e `listar_da_semana` em `cesta.py` e `produto_separado.py` | as consultas por semana, e o `travar_semana`, chamado no começo da separação |
 | exceções | `servicos/excecoes.py` | `EstoqueInsuficiente` (separação) e as do fluxo do pedido: `CestaNaoPedida`, `CestaNaoEmSeparacao` e `CestaIncompleta`. Todas viram 409 na rota |
+
+## As preferências da assinante
+
+A assinante marca cada produto do estoque como `quero`, `tanto_faz` (o padrão, sem linha no banco) ou `nao_quero`.
+A lista mostra os produtos ativos do catálogo que já entraram no estoque em alguma semana.
+
+| Camada | Arquivo | O que faz |
+| --- | --- | --- |
+| modelo | `modelos/preferencia.py` | a tabela `preferencias` (`assinante_id`, `produto_id`, `quer`), uma linha por produto e assinante (migration `0004`) |
+| rota | `rotas/preferencias.py` | `GET /preferencias` e `PUT /preferencias/{produto_id}`, que devolve a lista inteira atualizada |
+| rota | `rotas/produtos_separados.py` | `GET /cestas/{id}/preferencias`: o que a dona da cesta marcou, para o fechamento do produtor |
+| serviço | `servicos/preferencia.py` | `listar`, `definir` e `das_assinantes`, usada pela separação e pela IA |
+
+O `nao_quero` é regra: a separação manual recusa com `ProdutoNaoQuerido` (409), e a IA não recebe o produto
+na sugestão nem na confirmação (`conferir_itens` com o `nao_quer` de cada cesta). O `quero` é prioridade: vai
+para o modelo como `quer` da cesta e aparece com ★ no topo do formulário do produtor. As preferências vão ao
+modelo só como ids de produto, sem o nome da assinante.
 
 ## O pré-preenchimento com IA
 
@@ -80,6 +98,7 @@ A sugestão não trava nada. Só a confirmação trava a semana, confere de novo
 | Login e cadastro | ninguém logado | `Login` |
 | Início e Pedir a cesta (janela de confirmação) | assinante | `Inicio` e a `Janela` do pedido |
 | Minhas cestas, com os produtos separados | assinante | `MinhasCestas` |
+| Preferências (quero, tanto faz, não quero por produto do estoque) | assinante | `Preferencias` |
 | A separação, com seletor de semana, filtro por tamanho e por assinante (pelo nome na cesta) | produtor | `Separacao`, com o `SeletorDeSemana` |
 | O rascunho da IA, editável, dentro da separação | produtor | `RascunhoDaIa` |
 | O fechamento (formulário que separa um produto, escolhido do estoque da semana da cesta, com a previsão da capacidade) | produtor | `FormularioDeProduto`, numa `Janela` |

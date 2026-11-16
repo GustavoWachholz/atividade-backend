@@ -27,7 +27,7 @@ from esquemas.usuario import UsuarioCriacao
 from repositorios import usuario as repositorio_usuario
 from servicos import usuario as servico_usuario
 from servicos.excecoes import (CestaIncompleta, CestaNaoEmSeparacao, CestaNaoPedida, EmailEmUso, SemanaForaDoPedido,
-                               EstoqueInsuficiente, LimiteDaCestaExcedido)
+                               EstoqueInsuficiente, LimiteDaCestaExcedido, ProdutoNaoQuerido)
 import seguranca
 from seguranca import criar_token, ler_token, verificar_senha
 from rotas.autenticacao import obter_usuario_atual
@@ -607,6 +607,41 @@ class TestesBackend(unittest.TestCase):
             resposta = self.cliente.post("/cestas/pre-preenchimento", json={"semana": "2026-10-05"})
         self.assertEqual(resposta.status_code, 409)
         chamar.assert_not_called()
+
+    # A assinante marca o que quer e o que não quer; tanto_faz apaga a marcação.
+    # Só aparecem os produtos ativos que já entraram no estoque.
+    def test_preferencias_da_assinante(self):
+        assinante = Usuario(id=self.criar_usuario(), nome="Assinante", tipo="assinante")
+        alface, couve = self.produto_id("Alface"), self.produto_id("Couve")
+        app.dependency_overrides[obter_usuario_atual] = lambda: assinante
+        lista = self.cliente.get("/preferencias").json()
+        self.assertEqual(lista, [{"produto_id": alface, "nome_produto": "Alface", "preferencia": "tanto_faz"}])
+        self.assertEqual(self.cliente.put(f"/preferencias/{couve}", json={"preferencia": "quero"}).status_code, 404)
+        resposta = self.cliente.put(f"/preferencias/{alface}", json={"preferencia": "nao_quero"})
+        self.assertEqual(resposta.json()[0]["preferencia"], "nao_quero")
+        resposta = self.cliente.put(f"/preferencias/{alface}", json={"preferencia": "quero"})
+        self.assertEqual(resposta.json()[0]["preferencia"], "quero")
+        resposta = self.cliente.put(f"/preferencias/{alface}", json={"preferencia": "tanto_faz"})
+        self.assertEqual(resposta.json()[0]["preferencia"], "tanto_faz")
+        self.assertEqual(self.cliente.put(f"/preferencias/{alface}", json={"preferencia": "talvez"}).status_code, 422)
+        # O produtor não tem preferências.
+        app.dependency_overrides[obter_usuario_atual] = lambda: self.usuario_atual
+        self.assertEqual(self.cliente.get("/preferencias").status_code, 403)
+
+    # O produto marcado como "não quero" não entra na cesta da assinante pela separação manual.
+    def test_separacao_respeita_o_nao_quero(self):
+        assinante_id = self.criar_usuario()
+        cesta_id = self.criar_cesta(assinante_id)
+        alface = self.produto_id("Alface")
+        app.dependency_overrides[obter_usuario_atual] = lambda: Usuario(
+            id=assinante_id, nome="Assinante", tipo="assinante")
+        self.cliente.put(f"/preferencias/{alface}", json={"preferencia": "nao_quero"})
+        app.dependency_overrides[obter_usuario_atual] = lambda: self.usuario_atual
+        self.assertEqual(self.cliente.get(f"/cestas/{cesta_id}/preferencias").json(),
+                         {"quer": [], "nao_quer": [alface]})
+        resposta = self.cliente.post(f"/cestas/{cesta_id}/produtos", json={"produto_id": alface, "quantidade": 1})
+        self.assertEqual(resposta.status_code, 409)
+        self.assertIn("não quer receber Alface", resposta.json()["detail"])
 
 
 # Estes testes validam SQL e HTTP sem conexão com o banco.
@@ -1276,6 +1311,44 @@ class TestesPrePreenchimento(unittest.TestCase):
                 servico_ia.confirmar(sessao, dados)
         sessao.add.assert_not_called()
         sessao.commit.assert_not_called()
+
+    # O que a assinante não quer nunca passa, nem na sugestão nem na confirmação.
+    def test_conferir_recusa_o_que_a_assinante_nao_quer(self):
+        itens = [{"cesta_id": 1, "produto_id": 2, "quantidade": 1},
+                 {"cesta_id": 1, "produto_id": 1, "quantidade": 1}]
+        validos, recusados, _, _ = servico_ia.conferir_itens(itens, {1: 5}, {1: 10, 2: 3}, {1: {2}})
+        self.assertEqual(validos, itens[1:])
+        self.assertIn("não quer", recusados[0]["motivo"])
+
+    # As preferências vão para o modelo só como ids, e o rascunho as mostra ao produtor.
+    def test_preferencias_vao_ao_modelo_sem_a_assinante(self):
+        self.estado["cestas"][0].update({"quer": [1], "nao_quer": [2]})
+        itens = [{"cesta_id": 1, "produto_id": 2, "quantidade": 2}, {"cesta_id": 1, "produto_id": 1, "quantidade": 3}]
+        with patch.object(servico_ia, "chamar_modelo", side_effect=[itens, []]) as chamar:
+            rascunho = servico_ia.sugerir(Mock(), date(2026, 10, 5))
+        pedido = chamar.call_args_list[0].args[0]
+        self.assertIn('"quer": [1], "nao_quer": [2]', pedido)
+        self.assertNotIn("Pessoa Inventada", pedido)
+        self.assertEqual(rascunho["cestas"][0]["itens"], [{"produto_id": 1, "produto": "Alface", "quantidade": 3}])
+        self.assertEqual((rascunho["cestas"][0]["quer"], rascunho["cestas"][0]["nao_quer"]), ([1], [2]))
+
+    def test_confirmacao_recusa_o_que_a_assinante_nao_quer(self):
+        self.estado["cestas"][0]["nao_quer"] = [2]
+        sessao = Mock()
+        dados = ConfirmacaoDoRascunho(semana="2026-10-05", itens=[{"cesta_id": 1, "produto_id": 2, "quantidade": 1}])
+        with patch.object(repositorio_estoque, "travar_semana"):
+            with self.assertRaisesRegex(ConfirmacaoRecusada, "não quer"):
+                servico_ia.confirmar(sessao, dados)
+        sessao.add.assert_not_called()
+
+    # Na separação manual, o "não quero" vira ProdutoNaoQuerido antes de gravar.
+    def test_separacao_manual_recusa_o_que_a_assinante_nao_quer(self):
+        cesta = Cesta(id=12, assinante_id=3, tamanho="grande", situacao="em_separacao", semana=date(2026, 10, 19))
+        cesta.produtos_separados = []
+        with patch.object(servico_produto, "disponivel_do_produto", return_value=(Mock(nome_produto="Couve"), 9)),                 patch.object(servico_produto, "preferencias_da_cesta", return_value={"quer": set(), "nao_quer": {2}}),                 patch.object(repositorio_produto, "salvar") as salvar, patch.object(repositorio_estoque, "travar_semana"):
+            with self.assertRaises(ProdutoNaoQuerido):
+                servico_produto.separar(Mock(), cesta, Mock(produto_id=2, quantidade=1))
+            salvar.assert_not_called()
 
 
 # As rotas do pré-preenchimento: permissões e tradução das recusas para status.
