@@ -27,6 +27,10 @@ def separar(sessao, cesta, dados):
     if cesta.situacao != "em_separacao":
         raise CestaNaoEmSeparacao("Só é possível separar produtos de uma cesta aprovada e em separação.")
     repositorio_estoque.travar_semana(sessao, segunda_da_semana(cesta.semana))
+    # Relê a cesta depois da trava: se a assinante cancelou enquanto esta separação esperava, ela para aqui.
+    sessao.refresh(cesta)
+    if cesta.situacao != "em_separacao":
+        raise CestaNaoEmSeparacao("Só é possível separar produtos de uma cesta aprovada e em separação.")
     produtos = cesta.produtos_separados
     ocupado = sum(produto.quantidade for produto in produtos)
     restante = LIMITES[cesta.tamanho] - ocupado

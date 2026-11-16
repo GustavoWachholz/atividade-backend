@@ -303,3 +303,9 @@
 - Por quê: os dois modelos do Gemini usam a mesma chave e o mesmo provedor; com a API fora, a chave inválida ou a cota esgotada, os dois caíam juntos. O OpenRouter é outro provedor e outra chave. O modelo gratuito evita custo; ele tem limite diário e o provedor pode guardar o pedido, o que pesa pouco porque só vão ids, nomes e quantidades de produto e ids e tamanhos de cesta.
 - Ficou de fora: modelo pago no OpenRouter, mais de um modelo de reserva e encurtar o tempo dos Gemini. Quando a reserva entra, a correção quase nunca cabe no tempo.
 - Onde está: `configuracao.py` (`OPENROUTER_API_KEY`, `MODELO_DO_OPENROUTER`), `pedir_ao_openrouter` e `chamar_modelo` em `servicos/pre_preenchimento.py`, `ESQUEMA_DO_OPENROUTER` (o mesmo formato do `SugestaoDoModelo`, conferido por teste).
+
+## Migration do ENUM `cancelada` com `op.execute` (exceção)
+- Decisão: a `0005` acrescenta `cancelada` ao `ENUM` `situacao_cesta` com `ALTER TYPE ... ADD VALUE`, por `op.execute`, dentro de um `autocommit_block`. No MySQL, usa o `op.alter_column`, como a `a1c4e7d20f35`.
+- Por quê: o banco agora é Postgres, onde um valor novo de `ENUM` só entra por `ALTER TYPE`, e o Alembic não tem operação para isso. O `alter_column` não muda o tipo que já existe.
+- Ficou de fora: recriar o tipo e a coluna, e o `downgrade` (o Postgres não retira valor de `ENUM`).
+- Onde está: `migracoes/versions/0005_cesta_cancelada.py`.

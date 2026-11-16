@@ -61,6 +61,7 @@ def ler_token(token: str):
 #   cestas:ver_todas   ver as cestas de qualquer assinante. Sem ela, vê só as próprias
 #   cestas:aprovar     PATCH /cestas/{id}/aprovar e /reprovar (decidir o pedido)
 #   cestas:concluir    PATCH /cestas/{id}/concluir
+#   cestas:cancelar    PATCH /cestas/{id}/cancelar (a assinante desiste do próprio pedido)
 #   cestas:pre_preencher  POST /cestas/pre-preenchimento (pedir a sugestão da IA)
 #   produtos:separar   POST /cestas/{id}/produtos
 #   estoque:cadastrar  POST /estoques (a colheita da semana)
@@ -74,7 +75,7 @@ GRUPOS = {
     # Ela também vê o estoque, para saber o que vem na semana, mas não cadastra.
     # Ela vê o catálogo e marca, nas preferências, o que quer ou não receber.
     "assinante": {"conta:ver", "cestas:pedir", "cestas:ver", "estoque:ver",
-                  "catalogo:ver", "preferencias:editar"},
+                  "catalogo:ver", "preferencias:editar", "cestas:cancelar"},
     # O produtor vê todas as cestas, separa os produtos e cadastra a colheita.
     "produtor": {"conta:ver", "cestas:ver", "cestas:ver_todas", "cestas:aprovar", "cestas:concluir",
                  "cestas:pre_preencher",

@@ -193,6 +193,7 @@ const SITUACOES = {
   em_separacao: { nome: 'Em separação', classe: 'status-progress' },
   concluida: { nome: 'Concluída', classe: 'status-done' },
   recusada: { nome: 'Recusada', classe: 'status-refused' },
+  cancelada: { nome: 'Cancelada', classe: 'status-cancelled' },
 };
 
 function SituacaoDaCesta({ situacao }) {
@@ -200,7 +201,7 @@ function SituacaoDaCesta({ situacao }) {
   return <span className={`status-badge ${info.classe}`}>{info.nome}</span>;
 }
 
-// PATCH de aprovar, reprovar ou concluir. Devolve a promessa; 401 volta para o login e
+// PATCH de aprovar, reprovar, concluir ou cancelar. Devolve a promessa; 401 volta para o login e
 // 409 mostra a frase que vem do serviço (ex.: "A cesta ainda não está cheia. Faltam 1 itens.").
 function decidirCesta(token, cestaId, acao, aoExpirar) {
   return fetch(`${URL_DA_API}/cestas/${cestaId}/${acao}`, {
@@ -767,8 +768,11 @@ function Preferencias({ token, navegar, aoExpirar }) {
 }
 
 // Tela de Minhas Cestas da assinante
-function MinhasCestas({ token, navegar, abrirPedido, aoExpirar, versao }) {
+function MinhasCestas({ token, navegar, abrirPedido, aoExpirar, aoAvisar, versao }) {
   const [cestas, setCestas] = useState([]);
+  // Id da cesta que pede a confirmação do cancelamento, e da que está sendo cancelada agora.
+  const [confirmandoCancelar, setConfirmandoCancelar] = useState(null);
+  const [cancelando, setCancelando] = useState(null);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
   const [produtosPorCesta, setProdutosPorCesta] = useState({});
@@ -799,6 +803,20 @@ function MinhasCestas({ token, navegar, abrirPedido, aoExpirar, versao }) {
   useEffect(() => {
     carregarCestas();
   }, [token, versao, pagina]);
+
+  // O back devolve ao estoque o que já tinha sido separado. A lista é buscada de novo para mostrar a situação nova.
+  const cancelar = (cesta) => {
+    setCancelando(cesta.id);
+    setErro('');
+    decidirCesta(token, cesta.id, 'cancelar', aoExpirar)
+      .then(() => {
+        setConfirmandoCancelar(null);
+        aoAvisar(`Seu pedido #${cesta.id} foi cancelado.`);
+        carregarCestas();
+      })
+      .catch((err) => setErro(err.message))
+      .finally(() => setCancelando(null));
+  };
 
   return <section className="container workspace page" aria-labelledby="titulo-minhas-cestas">
     <div className="workspace-heading">
@@ -843,6 +861,9 @@ function MinhasCestas({ token, navegar, abrirPedido, aoExpirar, versao }) {
                 {cesta.situacao === 'recusada' && (
                   <p className="entry-empty">O produtor não pôde atender este pedido. Você pode pedir outra cesta.</p>
                 )}
+                {cesta.situacao === 'cancelada' && (
+                  <p className="entry-empty">Você cancelou este pedido.</p>
+                )}
                 {(cesta.situacao === 'em_separacao' || cesta.situacao === 'concluida') && <>
                   <Capacidade cesta={cestaComProds} />
                   <div className="entry-items">
@@ -850,6 +871,29 @@ function MinhasCestas({ token, navegar, abrirPedido, aoExpirar, versao }) {
                     <ProdutosDaCesta produtos={prods} />
                   </div>
                 </>}
+                {(cesta.situacao === 'pedida' || cesta.situacao === 'em_separacao') && (
+                  confirmandoCancelar === cesta.id ? (
+                    <div className="cancel-confirm" role="group" aria-label={`Confirmar o cancelamento do pedido #${cesta.id}`}>
+                      <p>Cancelar este pedido? Não dá para desfazer, e os produtos já separados voltam para o produtor.</p>
+                      <div className="entry-actions-row">
+                        <button type="button" className="btn btn-danger" disabled={cancelando === cesta.id}
+                          onClick={() => cancelar(cesta)}>
+                          {cancelando === cesta.id ? 'Cancelando...' : 'Sim, cancelar'}
+                        </button>
+                        <button type="button" className="btn btn-secondary" disabled={cancelando === cesta.id}
+                          onClick={() => setConfirmandoCancelar(null)}>
+                          Manter pedido
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="entry-actions">
+                      <button type="button" className="text-link cancel-link" onClick={() => setConfirmandoCancelar(cesta.id)}>
+                        Cancelar pedido
+                      </button>
+                    </div>
+                  )
+                )}
               </article>
             );
           })
@@ -1235,7 +1279,10 @@ function Separacao({ token, abrirFechamento, aoExpirar, versao }) {
                   <SituacaoDaCesta situacao={cesta.situacao} />
                 </div>
                 {/* Pedida: o produtor decide. Em separação e concluída mostram a capacidade e os produtos. */}
-                {cesta.situacao !== 'pedida' && cesta.situacao !== 'recusada' && <>
+                {cesta.situacao === 'cancelada' && (
+                  <p className="entry-empty">A assinante cancelou este pedido. Os produtos separados voltaram ao estoque.</p>
+                )}
+                {(cesta.situacao === 'em_separacao' || cesta.situacao === 'concluida') && <>
                   <Capacidade cesta={cestaComProds} />
                   <div className="entry-items">
                     <h3>Produtos já separados</h3>
@@ -1949,7 +1996,7 @@ export default function App() {
       ) : (
         <>
           {tela === 'inicio' && <Inicio pedir={setTamanhoPedido} navegar={setTela} />}
-          {tela === 'cestas' && <MinhasCestas token={token} navegar={setTela} abrirPedido={() => setTamanhoPedido('media')} aoExpirar={sair} versao={versao} />}
+          {tela === 'cestas' && <MinhasCestas token={token} navegar={setTela} abrirPedido={() => setTamanhoPedido('media')} aoExpirar={sair} aoAvisar={setAviso} versao={versao} />}
           {tela === 'preferencias' && <Preferencias token={token} navegar={setTela} aoExpirar={sair} />}
         </>
       )}

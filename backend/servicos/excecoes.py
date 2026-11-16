@@ -75,3 +75,7 @@ class ProdutoNaoQuerido(Exception):
 
 class ProdutoForaDasPreferencias(Exception):
     """O produto não está entre os do estoque que a assinante pode marcar."""
+
+
+class CestaNaoCancelavel(Exception):
+    """A cesta já foi concluída, recusada ou cancelada, e não pode mais ser cancelada."""

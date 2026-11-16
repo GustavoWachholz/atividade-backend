@@ -15,9 +15,10 @@ class Cesta(Base):
     semana = Column(Date, nullable=False)
     tamanho = Column(Enum("pequena", "media", "grande", name="tamanho_cesta"), nullable=False)
     # O fluxo do pedido: pedida -> (produtor aprova) em_separacao -> (produtor conclui) concluida,
-    # ou pedida -> (produtor reprova) recusada. Os valores novos ficam no fim da lista para as
-    # cestas já gravadas continuarem válidas.
-    situacao = Column(Enum("pedida", "em_separacao", "concluida", "recusada", name="situacao_cesta"),
+    # ou pedida -> (produtor reprova) recusada. A assinante cancela a pedida ou a em_separacao: cancelada.
+    # Os valores novos ficam no fim da lista para as cestas já gravadas continuarem válidas.
+    situacao = Column(Enum("pedida", "em_separacao", "concluida", "recusada", "cancelada",
+                           name="situacao_cesta"),
                       nullable=False, server_default="pedida")
     # DateTime e Enum preservam as colunas existentes; não exigem alterar tabelas.
     criado_em = Column(DateTime, nullable=False, server_default=func.current_timestamp())

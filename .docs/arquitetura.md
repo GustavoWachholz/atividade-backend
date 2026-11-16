@@ -47,6 +47,7 @@ A trava é solta no commit, ou quando a sessão fecha sem commit (recusa).
 | `estoque:ver` | `GET /estoques` | sim | sim |
 | `catalogo:ver` | `GET /produtos` | sim | sim |
 | `catalogo:editar` | `POST /produtos` e `PATCH /produtos/{id}` | não | sim |
+| `cestas:cancelar` | `PATCH /cestas/{id}/cancelar` (só a própria cesta) | sim | não |
 | `preferencias:editar` | `GET /preferencias` e `PUT /preferencias/{produto_id}` | sim | não |
 
 O grupo é o valor de `usuarios.tipo`. As permissões ficam em `GRUPOS`, no `seguranca.py`.
@@ -63,6 +64,14 @@ O grupo é o valor de `usuarios.tipo`. As permissões ficam em `GRUPOS`, no `seg
 | serviço | `servicos/produto_separado.py` | `separar` confere o limite da cesta e depois o estoque do produto |
 | repositório | `repositorios/estoque.py`, e `listar_da_semana` em `cesta.py` e `produto_separado.py` | as consultas por semana, e o `travar_semana`, chamado no começo da separação |
 | exceções | `servicos/excecoes.py` | `EstoqueInsuficiente` (separação) e as do fluxo do pedido: `CestaNaoPedida`, `CestaNaoEmSeparacao` e `CestaIncompleta`. Todas viram 409 na rota |
+
+## O cancelamento pela assinante
+
+A assinante cancela a própria cesta `pedida` ou `em_separacao` (`PATCH /cestas/{id}/cancelar`), e ela fica `cancelada`.
+`servicos/cesta.cancelar` trava a semana antes, e a separação relê a cesta depois da trava, para não gravar numa cesta
+que acabou de ser cancelada. Nada é apagado: os produtos continuam na cesta como histórico, e
+`repositorios/produto_separado.listar_da_semana` deixa a cesta cancelada fora da soma do separado, então eles voltam
+a contar como disponíveis no estoque. Concluída, recusada ou já cancelada dá `CestaNaoCancelavel` (409).
 
 ## As preferências da assinante
 

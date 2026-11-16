@@ -31,7 +31,7 @@ class CestaResposta(BaseModel):
     assinante: AssinanteResumo
     semana: date
     tamanho: TamanhoCesta
-    situacao: Literal["pedida", "em_separacao", "concluida", "recusada"]
+    situacao: Literal["pedida", "em_separacao", "concluida", "recusada", "cancelada"]
     criado_em: datetime
 
 

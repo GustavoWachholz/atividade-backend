@@ -255,3 +255,12 @@ dialog{border:1px solid #dce6d4;border-radius:22px;padding:30px 33px 31px;width:
 @media (max-width:420px){.pref-item fieldset{flex-direction:column;align-items:stretch}.pref-options{display:flex}.pref-option{flex:1}.pref-option span{width:100%;justify-content:center;padding:0 6px}}
 /* O link de voltar fica na própria linha, acima do "SUA ÁREA", e não ao lado dele */
 .back-link{display:flex;width:fit-content}
+
+/* Cancelamento do pedido pela assinante */
+.status-cancelled{color:#5f625b;background:#eceee8}
+.cancel-link{background:none;border:0;padding:0;min-height:44px;color:var(--feedback-error);font-weight:800;text-decoration:underline;cursor:pointer}
+.cancel-confirm{margin-top:18px;padding:14px 16px;border:1px solid #efc9c3;background:#fdf6f4;border-radius:12px}
+.cancel-confirm p{margin:0 0 12px;font-size:13px;color:#6b2a22}
+.cancel-confirm .entry-actions-row{display:flex;flex-wrap:wrap;gap:10px}
+.btn-danger{background:var(--feedback-error);color:#fff;border-color:var(--feedback-error)}
+.btn-danger:hover{background:#8a2019}

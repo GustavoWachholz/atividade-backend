@@ -121,6 +121,13 @@ def exigir_editar_catalogo(usuario=Depends(obter_usuario_atual)):
     return usuario
 
 
+# PATCH /cestas/{id}/cancelar: só a assinante cancela, e só a própria cesta (a cesta_existente confere o dono).
+def exigir_cancelar_cesta(usuario=Depends(obter_usuario_atual)):
+    if not tem_permissao(usuario, "cestas:cancelar"):
+        raise HTTPException(status_code=403, detail="Seu grupo não pode cancelar pedidos")
+    return usuario
+
+
 # GET e PUT /preferencias: só a assinante marca o que quer ou não receber na cesta.
 def exigir_editar_preferencias(usuario=Depends(obter_usuario_atual)):
     if not tem_permissao(usuario, "preferencias:editar"):

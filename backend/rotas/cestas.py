@@ -6,11 +6,12 @@ from sqlalchemy.orm import Session
 from banco import obter_sessao
 from esquemas.cesta import CestaCriacao, CestaDetalheResposta, CestaResposta, TamanhoCesta
 # [NOVO · grupos] exigir_pedir_cesta e exigir_ver_cestas substituem exigir_assinante e obter_usuario_atual.
-from rotas.autenticacao import (exigir_aprovar_cesta, exigir_concluir_cesta,
+from rotas.autenticacao import (exigir_aprovar_cesta, exigir_cancelar_cesta, exigir_concluir_cesta,
                                 exigir_pedir_cesta, exigir_ver_cestas)
 from seguranca import tem_permissao  # [NOVO · grupos]
 from servicos import cesta as servico_cesta
-from servicos.excecoes import CestaIncompleta, CestaNaoEmSeparacao, CestaNaoPedida, SemanaForaDoPedido
+from servicos.excecoes import (CestaIncompleta, CestaNaoCancelavel, CestaNaoEmSeparacao, CestaNaoPedida,
+                               SemanaForaDoPedido)
 
 router = APIRouter(prefix="/cestas", tags=["Cestas"])
 
@@ -119,4 +120,21 @@ def concluir_cesta(usuario=Depends(exigir_concluir_cesta), cesta=Depends(cesta_e
     try:
         return servico_cesta.concluir(sessao, cesta)
     except (CestaNaoEmSeparacao, CestaIncompleta) as erro:
+        raise HTTPException(status_code=409, detail=str(erro))
+
+
+# A assinante desiste do pedido enquanto ele está pedido ou em separação.
+# O que já tinha sido separado volta ao estoque da semana. A cesta de outra pessoa dá 403 na cesta_existente.
+@router.patch("/{cesta_id}/cancelar", response_model=CestaResposta,
+              summary="Cancelar o próprio pedido",
+              responses={401: {"description": "Sem token, ou token inválido ou vencido"},
+                         403: {"description": "Sem a permissão cestas:cancelar, ou a cesta é de outra assinante"},
+                         404: {"description": "A cesta não existe"},
+                         409: {"description": "A cesta já foi concluída, recusada ou cancelada"}})
+def cancelar_cesta(usuario=Depends(exigir_cancelar_cesta), cesta=Depends(cesta_existente),
+                   sessao: Session = Depends(obter_sessao)):
+    """A cesta passa para cancelada, e os produtos dela voltam a ficar disponíveis no estoque."""
+    try:
+        return servico_cesta.cancelar(sessao, cesta)
+    except CestaNaoCancelavel as erro:
         raise HTTPException(status_code=409, detail=str(erro))

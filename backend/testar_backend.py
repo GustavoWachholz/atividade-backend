@@ -26,7 +26,7 @@ from modelos.usuario import Usuario
 from esquemas.usuario import UsuarioCriacao
 from repositorios import usuario as repositorio_usuario
 from servicos import usuario as servico_usuario
-from servicos.excecoes import (CestaIncompleta, CestaNaoEmSeparacao, CestaNaoPedida, EmailEmUso, SemanaForaDoPedido,
+from servicos.excecoes import (CestaIncompleta, CestaNaoCancelavel, CestaNaoEmSeparacao, CestaNaoPedida, EmailEmUso, SemanaForaDoPedido,
                                EstoqueInsuficiente, LimiteDaCestaExcedido, ProdutoNaoQuerido)
 import seguranca
 from seguranca import criar_token, ler_token, verificar_senha
@@ -607,6 +607,34 @@ class TestesBackend(unittest.TestCase):
             resposta = self.cliente.post("/cestas/pre-preenchimento", json={"semana": "2026-10-05"})
         self.assertEqual(resposta.status_code, 409)
         chamar.assert_not_called()
+
+    # A assinante cancela a cesta em separação, e o que estava nela volta ao estoque da semana.
+    def test_cancelar_devolve_os_produtos_ao_estoque(self):
+        self.cadastrar_estoque("2026-10-19", "Cenoura", 10)
+        assinante_id = self.criar_usuario()
+        cesta_id = self.criar_cesta(assinante_id)
+        cenoura = self.produto_id("Cenoura")
+        self.cliente.post(f"/cestas/{cesta_id}/produtos", json={"produto_id": cenoura, "quantidade": 3})
+
+        def disponivel():
+            itens = self.cliente.get("/estoques?semana=2026-10-19").json()["itens"]
+            return next(item["disponivel"] for item in itens if item["produto_id"] == cenoura)
+
+        self.assertEqual(disponivel(), 7)
+        # O produtor não cancela pedidos.
+        self.assertEqual(self.cliente.patch(f"/cestas/{cesta_id}/cancelar").status_code, 403)
+        app.dependency_overrides[obter_usuario_atual] = lambda: Usuario(
+            id=assinante_id, nome="Assinante", tipo="assinante")
+        resposta = self.cliente.patch(f"/cestas/{cesta_id}/cancelar")
+        self.assertEqual(resposta.status_code, 200)
+        self.assertEqual(resposta.json()["situacao"], "cancelada")
+        self.assertEqual(self.cliente.patch(f"/cestas/{cesta_id}/cancelar").status_code, 409)
+        # Os produtos continuam na cesta, como histórico.
+        self.assertEqual(len(self.cliente.get(f"/cestas/{cesta_id}/produtos").json()), 1)
+        app.dependency_overrides[obter_usuario_atual] = lambda: self.usuario_atual
+        self.assertEqual(disponivel(), 10)
+        self.assertEqual(self.cliente.post(f"/cestas/{cesta_id}/produtos",
+                                           json={"produto_id": cenoura, "quantidade": 1}).status_code, 409)
 
     # A assinante marca o que quer e o que não quer; tanto_faz apaga a marcação.
     # Só aparecem os produtos ativos que já entraram no estoque.
@@ -1311,6 +1339,25 @@ class TestesPrePreenchimento(unittest.TestCase):
                 servico_ia.confirmar(sessao, dados)
         sessao.add.assert_not_called()
         sessao.commit.assert_not_called()
+
+    # Pedida e em separação podem ser canceladas; concluída, recusada e cancelada não.
+    def test_cancelar_so_vale_antes_de_concluir(self):
+        with patch.object(repositorio_cesta, "atualizar", side_effect=lambda _, cesta: cesta), \
+                patch.object(repositorio_estoque, "travar_semana") as travar:
+            for situacao in ["pedida", "em_separacao"]:
+                cesta = Cesta(id=1, situacao=situacao, semana=date(2026, 10, 22))
+                self.assertEqual(servico_cesta.cancelar(Mock(), cesta).situacao, "cancelada")
+            for situacao in ["concluida", "recusada", "cancelada"]:
+                with self.assertRaises(CestaNaoCancelavel):
+                    servico_cesta.cancelar(Mock(), Cesta(id=1, situacao=situacao, semana=date(2026, 10, 22)))
+        self.assertEqual(travar.call_args.args[1], date(2026, 10, 19))
+
+    # A soma do separado na semana deixa de fora a cesta cancelada.
+    def test_separado_da_semana_ignora_cesta_cancelada(self):
+        sessao = Mock()
+        repositorio_produto.listar_da_semana(sessao, date(2026, 10, 19))
+        sql = str(sessao.scalars.call_args.args[0].compile(compile_kwargs={"literal_binds": True}))
+        self.assertIn("cestas.situacao != 'cancelada'", sql)
 
     # O que a assinante não quer nunca passa, nem na sugestão nem na confirmação.
     def test_conferir_recusa_o_que_a_assinante_nao_quer(self):

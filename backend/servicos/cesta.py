@@ -4,7 +4,8 @@ from esquemas.cesta import CestaResposta
 from repositorios import cesta as repositorio_cesta
 from repositorios import estoque as repositorio_estoque
 from seguranca import tem_permissao  # [NOVO · grupos]
-from servicos.excecoes import CestaIncompleta, CestaNaoPedida, CestaNaoEmSeparacao, SemanaForaDoPedido
+from servicos.excecoes import (CestaIncompleta, CestaNaoCancelavel, CestaNaoPedida, CestaNaoEmSeparacao,
+                               SemanaForaDoPedido)
 
 # A capacidade é regra de negócio e não uma coluna da tabela.
 LIMITES = {"pequena": 5, "media": 8, "grande": 12}
@@ -93,6 +94,18 @@ def concluir(sessao, cesta):
     if restante > 0:
         raise CestaIncompleta(f"A cesta ainda não está cheia. Faltam {restante} itens.")
     cesta.situacao = "concluida"
+    return repositorio_cesta.atualizar(sessao, cesta)
+
+
+# A assinante cancela o próprio pedido enquanto ele está pedido ou em separação.
+# Os produtos já separados voltam ao estoque sem apagar nada: a soma do separado na semana
+# (repositorios/produto_separado.listar_da_semana) deixa a cesta cancelada de fora.
+# A trava da semana vem antes, para uma separação ao mesmo tempo esperar e ver a cesta já cancelada.
+def cancelar(sessao, cesta):
+    repositorio_estoque.travar_semana(sessao, segunda_da_semana(cesta.semana))
+    if cesta.situacao not in ("pedida", "em_separacao"):
+        raise CestaNaoCancelavel("Só é possível cancelar um pedido que ainda não foi concluído.")
+    cesta.situacao = "cancelada"
     return repositorio_cesta.atualizar(sessao, cesta)
 
 

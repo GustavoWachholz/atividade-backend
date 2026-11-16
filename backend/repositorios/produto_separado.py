@@ -8,9 +8,12 @@ from modelos.produto_separado import ProdutoSeparado
 
 # Os produtos já separados nas cestas de uma semana. O .join liga cada produto à cesta dele
 # pela chave estrangeira, para filtrar pela semana, que é coluna da cesta. semana é a segunda-feira.
+# A cesta cancelada fica de fora: os produtos dela continuam gravados, como histórico,
+# mas voltam a contar como disponíveis no estoque.
 def listar_da_semana(sessao, semana):
     consulta = select(ProdutoSeparado).join(Cesta).where(
-        Cesta.semana >= semana, Cesta.semana < semana + timedelta(days=7))
+        Cesta.semana >= semana, Cesta.semana < semana + timedelta(days=7),
+        Cesta.situacao != "cancelada")
     return sessao.scalars(consulta).all()
 
 
