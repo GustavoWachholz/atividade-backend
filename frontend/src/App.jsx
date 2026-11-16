@@ -1759,7 +1759,7 @@ function CarrosselInicio({ pedir, navegar }) {
   </section>;
 }
 
-// Início / Vitrine para Assinante: o carrossel, a escolha do tamanho e as facilidades.
+// Início / Vitrine para Assinante: o carrossel e a escolha do tamanho.
 function Inicio({ pedir, navegar }) {
   return <div className="page active-page">
     <CarrosselInicio pedir={pedir} navegar={navegar} />
@@ -1795,13 +1795,6 @@ function Inicio({ pedir, navegar }) {
           </article>
         ))}
       </div>
-    </section>
-
-    <section className="benefits container benefits-after" aria-label="Facilidades da Cesta do Vale">
-      <div className="benefit"><span className="benefit-icon gold"><Icone nome="box" /></span><span><strong>Do seu tamanho</strong><small>Escolha entre 3 cestas</small></span></div>
-      <div className="benefit"><span className="benefit-icon green"><Icone nome="list" /></span><span><strong>Acompanhe tudo</strong><small>Veja o que já foi separado</small></span></div>
-      <div className="benefit"><span className="benefit-icon peach"><Icone nome="heart" /></span><span><strong>Feita em comunidade</strong><small>Uma horta que aproxima</small></span></div>
-      <div className="benefit"><span className="benefit-icon sage"><Icone nome="calendar" /></span><span><strong>Toda semana</strong><small>Um novo pedido, bem simples</small></span></div>
     </section>
   </div>;
 }
