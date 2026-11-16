@@ -123,14 +123,14 @@ def concluir_cesta(usuario=Depends(exigir_concluir_cesta), cesta=Depends(cesta_e
         raise HTTPException(status_code=409, detail=str(erro))
 
 
-# A assinante desiste do pedido enquanto ele está pedido ou em separação.
+# A assinante desiste do pedido só enquanto ele está em separação.
 # O que já tinha sido separado volta ao estoque da semana. A cesta de outra pessoa dá 403 na cesta_existente.
 @router.patch("/{cesta_id}/cancelar", response_model=CestaResposta,
               summary="Cancelar o próprio pedido",
               responses={401: {"description": "Sem token, ou token inválido ou vencido"},
                          403: {"description": "Sem a permissão cestas:cancelar, ou a cesta é de outra assinante"},
                          404: {"description": "A cesta não existe"},
-                         409: {"description": "A cesta já foi concluída, recusada ou cancelada"}})
+                         409: {"description": "A cesta não está em separação"}})
 def cancelar_cesta(usuario=Depends(exigir_cancelar_cesta), cesta=Depends(cesta_existente),
                    sessao: Session = Depends(obter_sessao)):
     """A cesta passa para cancelada, e os produtos dela voltam a ficar disponíveis no estoque."""

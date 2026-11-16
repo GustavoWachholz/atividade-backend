@@ -1340,14 +1340,13 @@ class TestesPrePreenchimento(unittest.TestCase):
         sessao.add.assert_not_called()
         sessao.commit.assert_not_called()
 
-    # Pedida e em separação podem ser canceladas; concluída, recusada e cancelada não.
-    def test_cancelar_so_vale_antes_de_concluir(self):
+    # Só a cesta em separação pode ser cancelada; pedida, concluída, recusada e cancelada não.
+    def test_cancelar_so_vale_em_separacao(self):
         with patch.object(repositorio_cesta, "atualizar", side_effect=lambda _, cesta: cesta), \
                 patch.object(repositorio_estoque, "travar_semana") as travar:
-            for situacao in ["pedida", "em_separacao"]:
-                cesta = Cesta(id=1, situacao=situacao, semana=date(2026, 10, 22))
-                self.assertEqual(servico_cesta.cancelar(Mock(), cesta).situacao, "cancelada")
-            for situacao in ["concluida", "recusada", "cancelada"]:
+            cesta = Cesta(id=1, situacao="em_separacao", semana=date(2026, 10, 22))
+            self.assertEqual(servico_cesta.cancelar(Mock(), cesta).situacao, "cancelada")
+            for situacao in ["pedida", "concluida", "recusada", "cancelada"]:
                 with self.assertRaises(CestaNaoCancelavel):
                     servico_cesta.cancelar(Mock(), Cesta(id=1, situacao=situacao, semana=date(2026, 10, 22)))
         self.assertEqual(travar.call_args.args[1], date(2026, 10, 19))

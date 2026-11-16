@@ -871,7 +871,7 @@ function MinhasCestas({ token, navegar, abrirPedido, aoExpirar, aoAvisar, versao
                     <ProdutosDaCesta produtos={prods} />
                   </div>
                 </>}
-                {(cesta.situacao === 'pedida' || cesta.situacao === 'em_separacao') && (
+                {cesta.situacao === 'em_separacao' && (
                   confirmandoCancelar === cesta.id ? (
                     <div className="cancel-confirm" role="group" aria-label={`Confirmar o cancelamento do pedido #${cesta.id}`}>
                       <p>Cancelar este pedido? Não dá para desfazer, e os produtos já separados voltam para o produtor.</p>

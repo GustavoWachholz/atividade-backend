@@ -78,4 +78,4 @@ class ProdutoForaDasPreferencias(Exception):
 
 
 class CestaNaoCancelavel(Exception):
-    """A cesta já foi concluída, recusada ou cancelada, e não pode mais ser cancelada."""
+    """Só a cesta em separação pode ser cancelada pela assinante."""

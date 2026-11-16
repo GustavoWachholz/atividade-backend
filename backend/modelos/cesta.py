@@ -15,7 +15,7 @@ class Cesta(Base):
     semana = Column(Date, nullable=False)
     tamanho = Column(Enum("pequena", "media", "grande", name="tamanho_cesta"), nullable=False)
     # O fluxo do pedido: pedida -> (produtor aprova) em_separacao -> (produtor conclui) concluida,
-    # ou pedida -> (produtor reprova) recusada. A assinante cancela a pedida ou a em_separacao: cancelada.
+    # ou pedida -> (produtor reprova) recusada. A assinante cancela a em_separacao: cancelada.
     # Os valores novos ficam no fim da lista para as cestas já gravadas continuarem válidas.
     situacao = Column(Enum("pedida", "em_separacao", "concluida", "recusada", "cancelada",
                            name="situacao_cesta"),

@@ -97,14 +97,14 @@ def concluir(sessao, cesta):
     return repositorio_cesta.atualizar(sessao, cesta)
 
 
-# A assinante cancela o próprio pedido enquanto ele está pedido ou em separação.
+# A assinante cancela o próprio pedido só enquanto ele está em separação.
 # Os produtos já separados voltam ao estoque sem apagar nada: a soma do separado na semana
 # (repositorios/produto_separado.listar_da_semana) deixa a cesta cancelada de fora.
 # A trava da semana vem antes, para uma separação ao mesmo tempo esperar e ver a cesta já cancelada.
 def cancelar(sessao, cesta):
     repositorio_estoque.travar_semana(sessao, segunda_da_semana(cesta.semana))
-    if cesta.situacao not in ("pedida", "em_separacao"):
-        raise CestaNaoCancelavel("Só é possível cancelar um pedido que ainda não foi concluído.")
+    if cesta.situacao != "em_separacao":
+        raise CestaNaoCancelavel("Só é possível cancelar um pedido que está em separação.")
     cesta.situacao = "cancelada"
     return repositorio_cesta.atualizar(sessao, cesta)
 

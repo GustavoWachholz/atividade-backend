@@ -67,11 +67,11 @@ O grupo é o valor de `usuarios.tipo`. As permissões ficam em `GRUPOS`, no `seg
 
 ## O cancelamento pela assinante
 
-A assinante cancela a própria cesta `pedida` ou `em_separacao` (`PATCH /cestas/{id}/cancelar`), e ela fica `cancelada`.
+A assinante cancela a própria cesta só quando ela está `em_separacao` (`PATCH /cestas/{id}/cancelar`), e ela fica `cancelada`.
 `servicos/cesta.cancelar` trava a semana antes, e a separação relê a cesta depois da trava, para não gravar numa cesta
 que acabou de ser cancelada. Nada é apagado: os produtos continuam na cesta como histórico, e
 `repositorios/produto_separado.listar_da_semana` deixa a cesta cancelada fora da soma do separado, então eles voltam
-a contar como disponíveis no estoque. Concluída, recusada ou já cancelada dá `CestaNaoCancelavel` (409).
+a contar como disponíveis no estoque. Pedida, concluída, recusada ou já cancelada dá `CestaNaoCancelavel` (409).
 
 ## As preferências da assinante
 
