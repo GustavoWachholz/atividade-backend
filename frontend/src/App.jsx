@@ -3,15 +3,34 @@ import { useEffect, useRef, useState } from 'react';
 import { URL_DA_API } from './api';
 
 const tamanhos = {
-  pequena: { nome: 'Pequena', limite: 5, classe: 'peach-bg', frase: 'O tamanho ideal para começar a aproveitar a semana.' },
-  media: { nome: 'Média', limite: 8, classe: 'sage-bg', frase: 'Um pouco mais de espaço para variar seus preparos.' },
-  grande: { nome: 'Grande', limite: 12, classe: 'ochre-bg', frase: 'Para quem quer aproveitar ao máximo a capacidade.' }
+  pequena: { nome: 'Pequena', limite: 5, classe: 'peach-bg', ilustracao: '/ilustracoes/cesta-pequena.svg', frase: 'O tamanho ideal para começar a aproveitar a semana.' },
+  media: { nome: 'Média', limite: 8, classe: 'sage-bg', ilustracao: '/ilustracoes/cesta-media.svg', frase: 'Um pouco mais de espaço para variar seus preparos.' },
+  grande: { nome: 'Grande', limite: 12, classe: 'ochre-bg', ilustracao: '/ilustracoes/cesta-grande.svg', frase: 'Para quem quer aproveitar ao máximo a capacidade.' }
 };
 
-const destaques = [
-  { titulo: <>Sua semana fica <em>mais fresquinha!</em></>, texto: 'Escolha uma cesta do seu tamanho e acompanhe cada produto separado com carinho.', acao: 'Escolher minha cesta', destino: 'cestas' },
-  { titulo: <>A horta pertinho <em>da sua rotina.</em></>, texto: 'Pequena, média ou grande: escolha a cesta que acompanha o ritmo da sua semana.', acao: 'Ver tamanhos', destino: 'cestas' },
-  { titulo: <>Mais clareza, <em>do pedido à cesta.</em></>, texto: 'Veja quando sua cesta entra em separação e quais produtos já foram registrados.', acao: 'Como funciona', destino: 'como-funciona' }
+// Páginas do carrossel do início: o que é o sistema, as cestas e as preferências.
+const paginasDoCarrossel = [
+  {
+    chave: 'sistema',
+    selo: 'COMO FUNCIONA',
+    titulo: <>A horta da comunidade, <em>direto na sua semana.</em></>,
+    texto: 'Você escolhe a cesta, o produtor colhe e separa os produtos da semana, e você acompanha cada etapa, do pedido à entrega.',
+    etiquetas: [{ icone: 'leaf', texto: 'Colhido na semana' }, { icone: 'list', texto: 'Acompanhe cada etapa' }]
+  },
+  {
+    chave: 'cestas',
+    selo: 'AS CESTAS',
+    titulo: <>Pequena, média ou grande: <em>do seu tamanho.</em></>,
+    texto: 'A pequena leva até 5 produtos, a média até 8 e a grande até 12. Faça o pedido em poucos cliques, toda semana.',
+    etiquetas: [{ icone: 'box', texto: '3 tamanhos' }, { icone: 'calendar', texto: 'Um pedido por semana' }]
+  },
+  {
+    chave: 'preferencias',
+    selo: 'SUAS PREFERÊNCIAS',
+    titulo: <>Diga o que você quer <em>e o que não quer.</em></>,
+    texto: 'Marque cada produto como Quero, Tanto faz ou Não quero. O produtor vê suas escolhas na hora de montar a cesta.',
+    etiquetas: [{ icone: 'heart', texto: 'Do seu jeito' }, { icone: 'check', texto: 'Respeitado na separação' }]
+  }
 ];
 
 // Mostra um ícone do conjunto SVG compartilhado pela interface.
@@ -37,6 +56,8 @@ function DefinicoesDeIcones() {
     <symbol id="i-heart" viewBox="0 0 24 24"><path d="M20.8 5.7a5.5 5.5 0 0 0-7.8 0L12 6.8l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 22l8.8-8.5a5.5 5.5 0 0 0 0-7.8Z" /></symbol>
     <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" /></symbol>
     <symbol id="i-x" viewBox="0 0 24 24"><path d="M5 5l14 14M19 5 5 19" /></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14" /></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7Z" /></symbol>
     <symbol id="i-filter" viewBox="0 0 24 24"><path d="M3 6h18M6 12h12M9 18h6" /></symbol>
     <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 11v6m0-10h.01" /></symbol>
   </svg>;
@@ -1622,59 +1643,126 @@ function Rodape({ navegar, usuario }) {
   </footer>;
 }
 
-// Início / Vitrine para Assinante
-function Inicio({ pedir, navegar }) {
-  const [destaque, setDestaque] = useState(0);
-  const atual = destaques[destaque];
-  const mudarDestaque = (valor) => setDestaque((valor + destaques.length) % destaques.length);
+// Carrossel do início: a página atual no centro e um pedaço das vizinhas aparecendo nas laterais.
+// Passa sozinho a cada 7 s; para ao passar o mouse, ao focar, no botão de pausa e com movimento reduzido.
+function CarrosselInicio({ pedir, navegar }) {
+  const total = paginasDoCarrossel.length;
+  const [atual, setAtual] = useState(0);
+  const [pausado, setPausado] = useState(() => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches));
+  const [emFoco, setEmFoco] = useState(false);
+  const inicioDoArraste = useRef(null);
+  const irPara = (indice) => setAtual((indice + total) % total);
+  const verTamanhos = () => document.getElementById('cestas')?.scrollIntoView({ behavior: 'smooth' });
 
-  return <div className="page active-page">
-    <section className="hero-wrap container" aria-label="Destaques da semana">
-      <div className={`hero slide-${destaque}`}>
-        <div className="hero-content">
-          <span className="eyebrow"><span className="eyebrow-dot" /> CESTAS SEMANAIS DA NOSSA HORTA</span>
-          <h1>{atual.titulo}</h1>
-          <p>{atual.texto}</p>
-          <div className="hero-actions">
-            <button type="button" className="btn btn-primary btn-large" onClick={() => pedir('media')}>
-              Pedir cesta média <Icone nome="arrow" />
-            </button>
-            <button type="button" className="text-link" onClick={() => navegar('cestas')}>
-              Minhas cestas <Icone nome="arrow" />
-            </button>
-          </div>
-          <div className="hero-carousel" aria-label="Selecionar destaque">
-            <button type="button" className="carousel-arrow" onClick={() => mudarDestaque(destaque - 1)} aria-label="Destaque anterior"><Icone nome="left" /></button>
-            <div className="carousel-dots">
-              {destaques.map((_, indice) => (
-                <button
-                  type="button"
-                  className={`dot ${indice === destaque ? 'active' : ''}`}
-                  key={indice}
-                  onClick={() => setDestaque(indice)}
-                  aria-label={`Destaque ${indice + 1} de ${destaques.length}`}
-                  aria-current={indice === destaque ? 'true' : undefined}
-                />
-              ))}
+  useEffect(() => {
+    if (pausado || emFoco) return undefined;
+    const relogio = setTimeout(() => setAtual((atual + 1) % total), 7000);
+    return () => clearTimeout(relogio);
+  }, [atual, pausado, emFoco, total]);
+
+  // Arrastar com o dedo ou o mouse troca de página
+  const comecarArraste = (e) => { inicioDoArraste.current = e.clientX; };
+  const terminarArraste = (e) => {
+    if (inicioDoArraste.current === null) return;
+    const distancia = e.clientX - inicioDoArraste.current;
+    inicioDoArraste.current = null;
+    if (Math.abs(distancia) > 50) irPara(atual + (distancia < 0 ? 1 : -1));
+  };
+
+  // -1 = à esquerda, 0 = no centro, 1 = à direita
+  const posicao = (indice) => ((indice - atual + total + 1) % total) - 1;
+
+  const visual = {
+    sistema: <img src="/ilustracoes/hero-horta.svg" width="640" height="520" alt="" draggable="false" />,
+    cestas: <div className="showcase-baskets">
+      {Object.entries(tamanhos).map(([chave, tamanho]) => <figure key={chave}>
+        <img src={tamanho.ilustracao} width="640" height="520" alt="" draggable="false" />
+        <figcaption><strong>{tamanho.nome}</strong> até {tamanho.limite}</figcaption>
+      </figure>)}
+    </div>,
+    preferencias: <ul className="showcase-prefs" aria-hidden="true">
+      {[['Tomate', 'quero'], ['Alface', 'tanto'], ['Beterraba', 'nao'], ['Cenoura', 'quero']].map(([nome, marca]) => <li key={nome}>
+        <span>{nome}</span>
+        <span className="showcase-pref-options">
+          <i className={marca === 'quero' ? 'on-quero' : ''}>Quero</i>
+          <i className={marca === 'tanto' ? 'on-tanto' : ''}>Tanto faz</i>
+          <i className={marca === 'nao' ? 'on-nao' : ''}>Não quero</i>
+        </span>
+      </li>)}
+    </ul>
+  };
+
+  const acoes = {
+    sistema: <>
+      <button type="button" className="btn btn-primary btn-large" onClick={verTamanhos}>Escolher minha cesta <Icone nome="arrow" /></button>
+      <button type="button" className="text-link" onClick={() => navegar('cestas')}>Minhas cestas <Icone nome="arrow" /></button>
+    </>,
+    cestas: <>
+      <button type="button" className="btn btn-primary btn-large" onClick={() => pedir('media')}>Pedir cesta média <Icone nome="arrow" /></button>
+      <button type="button" className="text-link" onClick={verTamanhos}>Ver os 3 tamanhos <Icone nome="arrow" /></button>
+    </>,
+    preferencias: <button type="button" className="btn btn-primary btn-large" onClick={() => navegar('preferencias')}>Marcar minhas preferências <Icone nome="arrow" /></button>
+  };
+
+  return <section
+    className="showcase"
+    aria-roledescription="carrossel"
+    aria-label="Conheça a Cesta do Vale"
+    onMouseEnter={() => setEmFoco(true)}
+    onMouseLeave={() => setEmFoco(false)}
+    onFocus={() => setEmFoco(true)}
+    onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setEmFoco(false); }}
+  >
+    <div className="showcase-stage" onPointerDown={comecarArraste} onPointerUp={terminarArraste} onPointerCancel={() => { inicioDoArraste.current = null; }}>
+      {paginasDoCarrossel.map((pagina, indice) => {
+        const lugar = posicao(indice);
+        return <article
+          key={pagina.chave}
+          className={`showcase-slide showcase-${pagina.chave}`}
+          data-pos={lugar}
+          aria-roledescription="página"
+          aria-label={`${indice + 1} de ${total}`}
+          aria-hidden={lugar !== 0}
+        >
+          <div className="showcase-inner" inert={lugar !== 0}>
+            <div className="showcase-copy">
+              <span className="eyebrow"><span className="eyebrow-dot" /> {pagina.selo}</span>
+              <h2>{pagina.titulo}</h2>
+              <p>{pagina.texto}</p>
+              <div className="hero-actions">{acoes[pagina.chave]}</div>
             </div>
-            <button type="button" className="carousel-arrow" onClick={() => mudarDestaque(destaque + 1)} aria-label="Próximo destaque"><Icone nome="right" /></button>
+            <div className="showcase-visual">{visual[pagina.chave]}</div>
           </div>
-        </div>
-        <div className="hero-visual">
-          <span className="floating-tag tag-top"><Icone nome="heart" /> Feito com cuidado</span>
-          <span className="hero-halo" />
-          <img src="/ilustracoes/hero-horta.svg" width="640" height="520" alt="Ilustração de uma cesta de hortaliças frescas" />
-          <span className="floating-tag tag-bottom"><Icone nome="leaf" /> Da nossa horta</span>
-        </div>
+          {lugar !== 0 && <button type="button" className="showcase-peek" tabIndex={-1} onClick={() => irPara(indice)} aria-label={`Ver página ${indice + 1}`} />}
+        </article>;
+      })}
+      <div className="showcase-tags" key={atual} aria-hidden="true">
+        {paginasDoCarrossel[atual].etiquetas.map((etiqueta, i) => <span className={`showcase-tag tag-${i}`} key={etiqueta.texto}><Icone nome={etiqueta.icone} /> {etiqueta.texto}</span>)}
       </div>
-    </section>
+    </div>
+    <div className="showcase-controls">
+      <button type="button" className="carousel-arrow" onClick={() => irPara(atual - 1)} aria-label="Página anterior"><Icone nome="left" /></button>
+      <div className="carousel-dots">
+        {paginasDoCarrossel.map((pagina, indice) => <button
+          type="button"
+          key={pagina.chave}
+          className={`dot ${indice === atual ? 'active' : ''}`}
+          onClick={() => irPara(indice)}
+          aria-label={`Página ${indice + 1} de ${total}`}
+          aria-current={indice === atual ? 'true' : undefined}
+        />)}
+      </div>
+      <button type="button" className="carousel-arrow" onClick={() => irPara(atual + 1)} aria-label="Próxima página"><Icone nome="right" /></button>
+      <button type="button" className="carousel-arrow" onClick={() => setPausado(!pausado)} aria-label={pausado ? 'Continuar a passagem automática' : 'Pausar a passagem automática'}><Icone nome={pausado ? 'play' : 'pause'} /></button>
+    </div>
+    <p className="sr-only" aria-live="polite">Página {atual + 1} de {total}: {paginasDoCarrossel[atual].selo.toLowerCase()}</p>
+  </section>;
+}
 
-    <section className="benefits container" aria-label="Facilidades da Cesta do Vale">
-      <div className="benefit"><span className="benefit-icon gold"><Icone nome="box" /></span><span><strong>Do seu tamanho</strong><small>Escolha entre 3 cestas</small></span></div>
-      <div className="benefit"><span className="benefit-icon green"><Icone nome="list" /></span><span><strong>Acompanhe tudo</strong><small>Veja o que já foi separado</small></span></div>
-      <div className="benefit"><span className="benefit-icon peach"><Icone nome="heart" /></span><span><strong>Feita em comunidade</strong><small>Uma horta que aproxima</small></span></div>
-      <div className="benefit"><span className="benefit-icon sage"><Icone nome="calendar" /></span><span><strong>Toda semana</strong><small>Um novo pedido, bem simples</small></span></div>
-    </section>
+// Início / Vitrine para Assinante: o carrossel, a escolha do tamanho e as facilidades.
+function Inicio({ pedir, navegar }) {
+  return <div className="page active-page">
+    <CarrosselInicio pedir={pedir} navegar={navegar} />
 
     <section className="section container basket-section" id="cestas">
       <div className="section-header">
@@ -1690,7 +1778,7 @@ function Inicio({ pedir, navegar }) {
           <article className={`basket-card ${chave === 'media' ? 'featured' : ''}`} key={chave}>
             {chave === 'media' && <span className="popular-flag"><Icone nome="heart" /> MAIS PEDIDA</span>}
             <div className={`basket-card-visual ${tamanho.classe}`}>
-              <img src="/ilustracoes/hero-horta.svg" alt={`Ilustração de cesta ${tamanho.nome.toLowerCase()}`} width="225" height="183" />
+              <img src={tamanho.ilustracao} alt={`Ilustração de cesta ${tamanho.nome.toLowerCase()}, com até ${tamanho.limite} produtos`} width="225" height="183" />
             </div>
             <div className="basket-card-body">
               <span className="card-kicker">CESTA SEMANAL</span>
@@ -1707,6 +1795,13 @@ function Inicio({ pedir, navegar }) {
           </article>
         ))}
       </div>
+    </section>
+
+    <section className="benefits container benefits-after" aria-label="Facilidades da Cesta do Vale">
+      <div className="benefit"><span className="benefit-icon gold"><Icone nome="box" /></span><span><strong>Do seu tamanho</strong><small>Escolha entre 3 cestas</small></span></div>
+      <div className="benefit"><span className="benefit-icon green"><Icone nome="list" /></span><span><strong>Acompanhe tudo</strong><small>Veja o que já foi separado</small></span></div>
+      <div className="benefit"><span className="benefit-icon peach"><Icone nome="heart" /></span><span><strong>Feita em comunidade</strong><small>Uma horta que aproxima</small></span></div>
+      <div className="benefit"><span className="benefit-icon sage"><Icone nome="calendar" /></span><span><strong>Toda semana</strong><small>Um novo pedido, bem simples</small></span></div>
     </section>
   </div>;
 }
