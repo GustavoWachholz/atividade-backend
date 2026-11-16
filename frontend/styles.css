@@ -264,3 +264,16 @@ dialog{border:1px solid #dce6d4;border-radius:22px;padding:30px 33px 31px;width:
 .cancel-confirm .entry-actions-row{display:flex;flex-wrap:wrap;gap:10px}
 .btn-danger{background:var(--feedback-error);color:#fff;border-color:var(--feedback-error)}
 .btn-danger:hover{background:#8a2019}
+
+/* Rodapé mais baixo em todo o sistema: menos respiro, logo menor e a mensagem em uma linha compacta */
+.site-footer{padding:28px 0 0}
+.footer-main{gap:28px;padding-bottom:24px;align-items:start}
+.footer-logo{width:160px}
+.footer-about p,.footer-main>div>p{margin-top:8px}
+.footer-main h2{margin:0 0 6px}
+.footer-main button{min-height:32px;padding:2px 0}
+.footer-message{padding:14px 16px;gap:6px;border-radius:13px}
+.footer-message .icon{width:20px;height:20px}
+.footer-message strong{font-size:18px}
+.footer-bottom{padding-top:10px;padding-bottom:12px}
+@media (max-width:680px){.site-footer{padding-top:22px}.footer-main{gap:18px 16px;padding-bottom:18px}.footer-logo{width:150px}}
