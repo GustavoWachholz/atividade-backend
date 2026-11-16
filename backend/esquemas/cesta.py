@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 TamanhoCesta = Literal["pequena", "media", "grande"]
+SituacaoCesta = Literal["pedida", "em_separacao", "concluida", "recusada", "cancelada"]
 
 
 # O esquema não tem o dono da cesta: ele vem sempre do token, no serviço.
@@ -31,7 +32,7 @@ class CestaResposta(BaseModel):
     assinante: AssinanteResumo
     semana: date
     tamanho: TamanhoCesta
-    situacao: Literal["pedida", "em_separacao", "concluida", "recusada", "cancelada"]
+    situacao: SituacaoCesta
     criado_em: datetime
 
 

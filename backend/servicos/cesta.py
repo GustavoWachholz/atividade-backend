@@ -55,12 +55,12 @@ def criar(sessao, dados, usuario):
 # Quem pode ver todas as cestas (o produtor) usa o filtro por assinante. Os outros veem só as próprias.
 # [NOVO · grupos] A decisão pergunta pela permissão cestas:ver_todas, e não mais pelo tipo do usuário.
 # O filtro semana aceita qualquer dia e vira a segunda-feira daquela semana.
-def listar(sessao, usuario, tamanho=None, assinante_id=None, pagina=1, semana=None):
+def listar(sessao, usuario, tamanho=None, assinante_id=None, pagina=1, semana=None, situacao=None):
     if semana is not None:
         semana = segunda_da_semana(semana)
     if not tem_permissao(usuario, "cestas:ver_todas"):
-        return repositorio_cesta.listar(sessao, tamanho, usuario.id, pagina, semana)
-    return repositorio_cesta.listar(sessao, tamanho, assinante_id, pagina, semana)
+        return repositorio_cesta.listar(sessao, tamanho, usuario.id, pagina, semana, situacao)
+    return repositorio_cesta.listar(sessao, tamanho, assinante_id, pagina, semana, situacao)
 
 
 # Devolve o objeto do modelo, ou None para a rota responder 404.

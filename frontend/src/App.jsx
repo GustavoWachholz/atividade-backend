@@ -798,11 +798,24 @@ function MinhasCestas({ token, navegar, abrirPedido, aoExpirar, aoAvisar, versao
   const [erro, setErro] = useState('');
   const [produtosPorCesta, setProdutosPorCesta] = useState({});
   const [pagina, setPagina] = useState(1);
+  // Filtros da lista: '' quer dizer "todas". A semana é a segunda-feira "AAAA-MM-DD" escolhida.
+  const [situacao, setSituacao] = useState('');
+  const [tamanho, setTamanho] = useState('');
+  const [semana, setSemana] = useState('');
+  const temFiltro = Boolean(situacao || tamanho || semana);
+
+  // Trocar qualquer filtro volta para a primeira página
+  const mudarFiltro = (setFiltro) => (valor) => { setFiltro(valor); setPagina(1); };
+  const limparFiltros = () => { setSituacao(''); setTamanho(''); setSemana(''); setPagina(1); };
 
   const carregarCestas = () => {
     setCarregando(true);
     setErro('');   // limpa o erro da busca anterior
-    fetch(`${URL_DA_API}/cestas?pagina=${pagina}`, {
+    const filtros = new URLSearchParams({ pagina });
+    if (situacao) filtros.set('situacao', situacao);
+    if (tamanho) filtros.set('tamanho', tamanho);
+    if (semana) filtros.set('semana', semana);
+    fetch(`${URL_DA_API}/cestas?${filtros}`, {
       headers: { Authorization: 'Bearer ' + token }
     })
       .then((res) => {
@@ -823,7 +836,7 @@ function MinhasCestas({ token, navegar, abrirPedido, aoExpirar, aoAvisar, versao
   // Busca de novo quando o token muda ou quando o App avisa que algo foi gravado (versao)
   useEffect(() => {
     carregarCestas();
-  }, [token, versao, pagina]);
+  }, [token, versao, pagina, situacao, tamanho, semana]);
 
   // O back devolve ao estoque o que já tinha sido separado. A lista é buscada de novo para mostrar a situação nova.
   const cancelar = (cesta) => {
@@ -852,6 +865,45 @@ function MinhasCestas({ token, navegar, abrirPedido, aoExpirar, aoAvisar, versao
       <button type="button" className="btn btn-primary" onClick={abrirPedido}>
         Pedir nova cesta <Icone nome="arrow" />
       </button>
+    </div>
+
+    <div className="filter-bar" role="search" aria-label="Filtrar minhas cestas">
+      <label htmlFor="minhas-situacao">
+        Situação
+        <select id="minhas-situacao" value={situacao} onChange={(e) => mudarFiltro(setSituacao)(e.target.value)}>
+          <option value="">Todas as situações</option>
+          {Object.entries(SITUACOES).map(([valor, info]) => (
+            <option key={valor} value={valor}>{info.nome}</option>
+          ))}
+        </select>
+      </label>
+      <label htmlFor="minhas-tamanho">
+        Tamanho
+        <select id="minhas-tamanho" value={tamanho} onChange={(e) => mudarFiltro(setTamanho)(e.target.value)}>
+          <option value="">Todos os tamanhos</option>
+          <option value="pequena">Pequena (5 itens)</option>
+          <option value="media">Média (8 itens)</option>
+          <option value="grande">Grande (12 itens)</option>
+        </select>
+      </label>
+      {/* Qualquer dia serve: a semana guardada é a segunda-feira daquele dia */}
+      <label htmlFor="minhas-semana">
+        Semana
+        <input id="minhas-semana" type="date" value={semana}
+          onChange={(e) => {
+            const [ano, mes, dia] = e.target.value.split('-').map(Number);
+            mudarFiltro(setSemana)(e.target.value ? dataISO(segundaDaSemana(new Date(ano, mes - 1, dia))) : '');
+          }} />
+      </label>
+      {temFiltro && (
+        <button type="button" className="text-link filter-clear" onClick={limparFiltros}>
+          <Icone nome="x" /> Limpar filtros
+        </button>
+      )}
+      <div className="filter-summary" aria-live="polite">
+        {semana && <>Semana {textoDaSemana(semana)} · </>}
+        {cestas.length} {cestas.length === 1 ? 'cesta' : 'cestas'}
+      </div>
     </div>
 
     {erro && <div className="dialog-error">{erro}</div>}
@@ -918,6 +970,15 @@ function MinhasCestas({ token, navegar, abrirPedido, aoExpirar, aoAvisar, versao
               </article>
             );
           })
+        ) : temFiltro ? (
+          <div className="empty-workspace">
+            <Icone nome="filter" />
+            <h3>Nenhuma cesta com esses filtros.</h3>
+            <p>Troque a situação, o tamanho ou a semana para ver outros pedidos.</p>
+            <button type="button" className="btn btn-secondary" onClick={limparFiltros}>
+              Limpar filtros
+            </button>
+          </div>
         ) : (
           <div className="empty-workspace">
             <Icone nome="box" />

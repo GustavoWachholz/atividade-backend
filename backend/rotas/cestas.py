@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from banco import obter_sessao
-from esquemas.cesta import CestaCriacao, CestaDetalheResposta, CestaResposta, TamanhoCesta
+from esquemas.cesta import CestaCriacao, CestaDetalheResposta, CestaResposta, SituacaoCesta, TamanhoCesta
 # [NOVO · grupos] exigir_pedir_cesta e exigir_ver_cestas substituem exigir_assinante e obter_usuario_atual.
 from rotas.autenticacao import (exigir_aprovar_cesta, exigir_cancelar_cesta, exigir_concluir_cesta,
                                 exigir_pedir_cesta, exigir_ver_cestas)
@@ -52,14 +52,16 @@ def criar_cesta(dados: CestaCriacao, usuario=Depends(exigir_pedir_cesta),  # [NO
             responses={401: {"description": "Sem token, ou token inválido ou vencido"},
                        403: {"description": "O grupo de quem está logado não tem a permissão cestas:ver"}})
 # semana é opcional: qualquer dia serve, e a lista traz as cestas daquela semana (segunda a domingo).
+# situacao filtra pela etapa do pedido; um valor fora da lista dá 422.
 def listar_cestas(tamanho: TamanhoCesta | None = None,
+                  situacao: SituacaoCesta | None = None,
                   assinante_id: int | None = Query(default=None, gt=0),
                   pagina: int = Query(default=1, ge=1),
                   semana: date | None = None,
                   usuario=Depends(exigir_ver_cestas),  # [NOVO · grupos]
                   sessao: Session = Depends(obter_sessao)):
     """Quem tem cestas:ver_todas (produtor) vê todas, com filtro por assinante. Os outros veem só as próprias."""
-    return servico_cesta.listar(sessao, usuario, tamanho, assinante_id, pagina, semana)
+    return servico_cesta.listar(sessao, usuario, tamanho, assinante_id, pagina, semana, situacao)
 
 
 # O detalhe acrescenta os cálculos de capacidade à cesta já conferida pela dependência.

@@ -8,7 +8,7 @@ from modelos.cesta import Cesta
 # O banco filtra antes de paginar. A semana mais recente vem primeiro (.desc() inverte a ordem),
 # para o pedido novo e a semana atual aparecerem na primeira página; o id desempata entre páginas.
 # semana chega já como a segunda-feira (o serviço converte) e pega a semana inteira, até domingo.
-def listar(sessao, tamanho=None, assinante_id=None, pagina=1, semana=None):
+def listar(sessao, tamanho=None, assinante_id=None, pagina=1, semana=None, situacao=None):
     consulta = select(Cesta).order_by(Cesta.semana.desc(), Cesta.id.desc())
     if tamanho is not None:
         consulta = consulta.where(Cesta.tamanho == tamanho)
@@ -16,6 +16,8 @@ def listar(sessao, tamanho=None, assinante_id=None, pagina=1, semana=None):
         consulta = consulta.where(Cesta.assinante_id == assinante_id)
     if semana is not None:
         consulta = consulta.where(Cesta.semana >= semana, Cesta.semana < semana + timedelta(days=7))
+    if situacao is not None:
+        consulta = consulta.where(Cesta.situacao == situacao)
     # limit traz dez cestas; offset pula os registros das páginas anteriores.
     consulta = consulta.limit(10).offset((pagina - 1) * 10)
     return sessao.scalars(consulta).all()

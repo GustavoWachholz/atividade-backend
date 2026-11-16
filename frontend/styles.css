@@ -354,3 +354,6 @@ dialog{border:1px solid #dce6d4;border-radius:22px;padding:30px 33px 31px;width:
   .showcase-pref-options i{font-size:10px;padding:5px 7px}
   .basket-section{padding-top:36px}
 }
+
+/* Minhas cestas: o botão de limpar os filtros fica alinhado aos campos, sem cara de botão */
+.filter-clear{border:0;background:transparent;padding:0 4px;align-self:center;font-size:13px;white-space:nowrap}

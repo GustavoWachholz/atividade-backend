@@ -331,15 +331,21 @@ class TestesBackend(unittest.TestCase):
         segundo = self.criar_usuario()
         pequena = self.criar_cesta(primeiro)
         media = self.criar_cesta(primeiro, "media")
-        outra_media = self.criar_cesta(segundo, "media")
+        outra_media = self.criar_cesta(segundo, "media", aprovar=False)
         for consulta, esperados in [
             ("tamanho=media", {media, outra_media}),
+            ("situacao=pedida", {outra_media}),
+            ("situacao=em_separacao&tamanho=media", {media}),
+            (f"situacao=pedida&assinante_id={primeiro}", set()),
+            ("semana=2026-10-08", {pequena, media, outra_media}),
+            ("semana=2026-10-12", set()),
             (f"assinante_id={primeiro}", {pequena, media}),
             (f"tamanho=media&assinante_id={primeiro}", {media}),
             ("assinante_id=999", set()),
         ]:
             resultado = self.cliente.get(f"/cestas?{consulta}").json()
             self.assertEqual({item["id"] for item in resultado}, esperados)
+        self.assertEqual(self.cliente.get("/cestas?situacao=perdida").status_code, 422)
 
     # Entradas inválidas e situação enviada pelo cliente não devem gerar dados.
     def test_entradas_invalidas(self):
@@ -818,9 +824,12 @@ class TestesSemConexao(unittest.TestCase):
         with TestClient(app) as cliente:
             with patch.object(servico_cesta, "listar", return_value=[]) as listar:
                 self.assertEqual(cliente.get("/cestas").status_code, 200)
-                self.assertEqual(listar.call_args.args[1:], (self.usuario_teste, None, None, 1, None))
+                self.assertEqual(listar.call_args.args[1:], (self.usuario_teste, None, None, 1, None, None))
                 self.assertEqual(cliente.get("/cestas?tamanho=media&assinante_id=7&pagina=3&semana=2026-10-22").status_code, 200)
-                self.assertEqual(listar.call_args.args[1:], (self.usuario_teste, "media", 7, 3, date(2026, 10, 22)))
+                self.assertEqual(listar.call_args.args[1:], (self.usuario_teste, "media", 7, 3, date(2026, 10, 22), None))
+                self.assertEqual(cliente.get("/cestas?situacao=concluida").status_code, 200)
+                self.assertEqual(listar.call_args.args[1:], (self.usuario_teste, None, None, 1, None, "concluida"))
+                self.assertEqual(cliente.get("/cestas?situacao=perdida").status_code, 422)
                 self.assertEqual(cliente.get("/cestas?semana=ontem").status_code, 422)
 
     # O serviço decide o que cada perfil vê: a assinante não escapa do filtro com assinante_id.
@@ -828,10 +837,13 @@ class TestesSemConexao(unittest.TestCase):
         assinante = Usuario(id=2, nome="Assinante", tipo="assinante")
         with patch.object(repositorio_cesta, "listar", return_value=[]) as listar:
             servico_cesta.listar(Mock(), assinante, "media", 7, 1)
-            self.assertEqual(listar.call_args.args[1:], ("media", 2, 1, None))
+            self.assertEqual(listar.call_args.args[1:], ("media", 2, 1, None, None))
             # Uma quinta-feira vira a segunda-feira da mesma semana antes de chegar ao repositório.
             servico_cesta.listar(Mock(), self.usuario_teste, "media", 7, 1, date(2026, 10, 22))
-            self.assertEqual(listar.call_args.args[1:], ("media", 7, 1, date(2026, 10, 19)))
+            self.assertEqual(listar.call_args.args[1:], ("media", 7, 1, date(2026, 10, 19), None))
+            # A assinante filtra pela situação e continua vendo só as próprias cestas.
+            servico_cesta.listar(Mock(), assinante, None, 7, 1, date(2026, 10, 22), "cancelada")
+            self.assertEqual(listar.call_args.args[1:], (None, 2, 1, date(2026, 10, 19), "cancelada"))
 
     # A regra recusa com exceção, antes de gravar, e não muda a situação.
     def test_regra_do_limite_levanta_excecao(self):
