@@ -41,7 +41,7 @@ class EstoqueDaSemanaResposta(BaseModel):
     semana: date
     itens: list[ItemDoEstoque]
     total_colhido: int
-    total_reservado: int = Field(description="Soma dos limites das cestas já pedidas na semana")
+    total_reservado: int = Field(description="Soma dos limites das cestas em separação e concluídas na semana")
     itens_livres: int = Field(description="Colhido menos reservado: o que ainda aceita pedido novo")
     tamanhos_liberados: list[TamanhoCesta] = Field(
         description="Tamanhos cujo limite cabe nos itens livres", examples=[["pequena", "media"]])
