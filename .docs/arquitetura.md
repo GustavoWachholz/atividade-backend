@@ -49,6 +49,7 @@ A trava é solta no commit, ou quando a sessão fecha sem commit (recusa).
 | `catalogo:editar` | `POST /produtos` e `PATCH /produtos/{id}` | não | sim |
 | `cestas:cancelar` | `PATCH /cestas/{id}/cancelar` (só a própria cesta) | sim | não |
 | `preferencias:editar` | `GET /preferencias` e `PUT /preferencias/{produto_id}` | sim | não |
+| `painel:ver` | `GET /painel` | não | sim |
 
 O grupo é o valor de `usuarios.tipo`. As permissões ficam em `GRUPOS`, no `seguranca.py`.
 
@@ -60,7 +61,7 @@ O grupo é o valor de `usuarios.tipo`. As permissões ficam em `GRUPOS`, no `seg
 | rota | `rotas/produtos.py` | o catálogo: `GET /produtos` (`?ativos=true` para as listas), `POST /produtos` e `PATCH /produtos/{id}` |
 | serviço | `servicos/produto.py` | `cadastrar` e `editar` (nome repetido vira `ProdutoRepetido`), e `buscar_ativo`, usado pelo estoque (`ProdutoIndisponivel`) |
 | serviço | `servicos/estoque.py` | `cadastrar`, `resumo_da_semana` e `disponivel_do_produto` |
-| serviço | `servicos/cesta.py` | `itens_livres_na_semana` (soma só as cestas `em_separacao`, para o resumo) e as decisões do pedido: `aprovar`, `reprovar` e `concluir`. Ficam aqui por usar os `LIMITES`, e o serviço do estoque importa daqui, sem import circular |
+| serviço | `servicos/cesta.py` | `itens_livres_na_semana` (soma as cestas `em_separacao` e `concluida`, os `RESERVAM`, para o resumo) e as decisões do pedido: `aprovar`, `reprovar` e `concluir`. Ficam aqui por usar os `LIMITES`, e o serviço do estoque importa daqui, sem import circular |
 | serviço | `servicos/produto_separado.py` | `separar` confere o limite da cesta e depois o estoque do produto |
 | repositório | `repositorios/estoque.py`, e `listar_da_semana` em `cesta.py` e `produto_separado.py` | as consultas por semana, e o `travar_semana`, chamado no começo da separação |
 | exceções | `servicos/excecoes.py` | `EstoqueInsuficiente` (separação) e as do fluxo do pedido: `CestaNaoPedida`, `CestaNaoEmSeparacao` e `CestaIncompleta`. Todas viram 409 na rota |
@@ -90,6 +91,23 @@ na sugestão nem na confirmação (`conferir_itens` com o `nao_quer` de cada ces
 para o modelo como `quer` da cesta e aparece com ★ no topo do formulário do produtor. As preferências vão ao
 modelo só como ids de produto, sem o nome da assinante.
 
+## O painel do produtor
+
+A tela inicial do produtor faz um `GET /painel?semana=` só, e o back devolve as contas prontas. Nada é coluna nova:
+tudo sai das cestas, do estoque, dos produtos separados e das preferências da semana.
+
+| Camada | Arquivo | O que faz |
+| --- | --- | --- |
+| rota | `rotas/painel.py` | `GET /painel?semana=` (qualquer dia vira a segunda-feira) |
+| serviço | `servicos/painel.py` | `da_semana`: estoque por produto, pedidos por situação, itens previstos e livres, quantas pedidas cabem, fila, separação, preferências, alertas e a semana anterior |
+| esquema | `esquemas/painel.py` | `PainelResposta` |
+
+- **Itens previstos**: soma dos limites das cestas `em_separacao` e `concluida`. **Livres**: colhido menos os previstos.
+- **Pedidas que cabem**: aprova, de mentira, das mais antigas para as mais novas enquanto couber nos livres; só orienta o produtor.
+- **Preferências e alertas** contam só as assinantes com cesta pedida, em separação ou concluída na semana.
+  Falta: mais `quero` do que disponível (ou não colhido). Sobra: colhido, com disponível e mais `nao_quero` do que `quero`.
+- **Semana anterior**: pedidos (sem as canceladas), colhido e separado, para as setas dos indicadores.
+
 ## O pré-preenchimento com IA
 
 | Camada | Arquivo | O que faz |
@@ -108,6 +126,7 @@ A sugestão não trava nada. Só a confirmação trava a semana, confere de novo
 | Início e Pedir a cesta (janela de confirmação) | assinante | `Inicio` e a `Janela` do pedido |
 | Minhas cestas, com os produtos separados | assinante | `MinhasCestas` |
 | Preferências (quero, tanto faz, não quero por produto do estoque) | assinante | `Preferencias` |
+| O painel da semana (tela inicial e item Painel do menu) | produtor | `Painel` e `ConteudoDoPainel` |
 | A separação, com seletor de semana, filtro por tamanho e por assinante (pelo nome na cesta) | produtor | `Separacao`, com o `SeletorDeSemana` |
 | O rascunho da IA, editável, dentro da separação | produtor | `RascunhoDaIa` |
 | O fechamento (formulário que separa um produto, escolhido do estoque da semana da cesta, com a previsão da capacidade) | produtor | `FormularioDeProduto`, numa `Janela` |

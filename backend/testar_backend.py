@@ -459,6 +459,19 @@ class TestesBackend(unittest.TestCase):
         self.assertEqual(self.decidir(recusada, "reprovar").status_code, 200)
         self.assertEqual(self.cliente.get("/estoques?semana=2026-10-19").json()["total_reservado"], 12)
 
+    # A cesta concluída continua reservando: os itens dela saíram e não voltam a ficar livres.
+    def test_cesta_concluida_continua_reservando(self):
+        assinante = self.criar_usuario()
+        self.cadastrar_estoque("2026-10-19", "Couve", 7)
+        cesta = self.pedir(assinante, "2026-10-19", "pequena").json()["id"]
+        self.decidir(cesta, "aprovar")
+        self.cliente.post(f"/cestas/{cesta}/produtos", json={"produto_id": self.produto_id("Couve"), "quantidade": 5})
+        self.assertEqual(self.decidir(cesta, "concluir").status_code, 200)
+        resumo = self.cliente.get("/estoques?semana=2026-10-19").json()
+        self.assertEqual((resumo["total_reservado"], resumo["itens_livres"]), (5, 2))
+        # Com 2 livres, nenhum tamanho cabe: a janela de pedido não libera a pequena de novo.
+        self.assertEqual(resumo["tamanhos_liberados"], [])
+
     # O fluxo do pedido: pedida -> aprovar -> separar -> concluir, e pedida -> reprovar.
     def test_fluxo_do_pedido(self):
         assinante = self.criar_usuario()
@@ -676,6 +689,58 @@ class TestesBackend(unittest.TestCase):
         resposta = self.cliente.post(f"/cestas/{cesta_id}/produtos", json={"produto_id": alface, "quantidade": 1})
         self.assertEqual(resposta.status_code, 409)
         self.assertIn("não quer receber Alface", resposta.json()["detail"])
+
+    # O painel do produtor junta estoque, pedidos, fila, separação, preferências e a semana anterior.
+    def test_painel_do_produtor(self):
+        semana = "2026-10-19"
+        self.cadastrar_estoque(semana, "Tomate", 10)
+        self.cadastrar_estoque(semana, "Couve", 10)
+        # A Cenoura foi colhida só na semana anterior: dá para marcar, mas não há nesta semana.
+        self.cadastrar_estoque("2026-10-12", "Cenoura", 4)
+        tomate, couve, cenoura = self.produto_id("Tomate"), self.produto_id("Couve"), self.produto_id("Cenoura")
+        ana, bia, caio, davi = (self.criar_usuario(nome) for nome in ["Ana", "Bia", "Caio", "Davi"])
+
+        def marcar(assinante_id, produto_id, preferencia):
+            app.dependency_overrides[obter_usuario_atual] = lambda: Usuario(
+                id=assinante_id, nome="Assinante", tipo="assinante")
+            self.cliente.put(f"/preferencias/{produto_id}", json={"preferencia": preferencia})
+            app.dependency_overrides[obter_usuario_atual] = lambda: self.usuario_atual
+
+        marcar(ana, tomate, "quero")
+        marcar(ana, cenoura, "quero")
+        marcar(bia, tomate, "quero")
+        marcar(caio, couve, "nao_quero")
+        marcar(davi, couve, "quero")  # Davi foi recusado: a marcação dele não conta na semana
+
+        grande = self.pedir(ana, semana, "grande").json()["id"]
+        self.decidir(grande, "aprovar")
+        self.cliente.post(f"/cestas/{grande}/produtos", json={"produto_id": tomate, "quantidade": 3})
+        pequena_bia = self.pedir(bia, semana, "pequena").json()["id"]
+        self.pedir(caio, semana, "pequena")
+        self.decidir(self.pedir(davi, semana, "media").json()["id"], "reprovar")
+
+        painel = self.cliente.get(f"/painel?semana=2026-10-22").json()
+        self.assertEqual(painel["semana"], semana)
+        self.assertEqual(painel["pedidos"], {"pedida": 2, "em_separacao": 1, "concluida": 0,
+                                             "recusada": 1, "cancelada": 0})
+        self.assertEqual((painel["total_colhido"], painel["itens_previstos"], painel["itens_livres"]), (20, 12, 8))
+        # Aprovando das mais antigas: a pequena da Bia cabe (5 de 8), e a do Caio já não (5 de 3).
+        self.assertEqual((painel["itens_das_pedidas"], painel["pedidas_que_cabem"]), (10, 1))
+        self.assertEqual([c["nome_assinante"] for c in painel["fila"]], ["Bia", "Caio"])
+        self.assertEqual(painel["fila"][0]["id"], pequena_bia)
+        self.assertEqual(painel["cestas_em_separacao"], [{"id": grande, "nome_assinante": "Ana", "tamanho": "grande",
+                                                          "limite_itens": 12, "quantidade_ocupada": 3}])
+        self.assertEqual(painel["itens_separados"], 3)
+        self.assertEqual(painel["assinantes_na_semana"], 3)
+        self.assertEqual([(p["nome_produto"], p["quer"], p["nao_quer"], p["disponivel"]) for p in painel["populares"]],
+                         [("Tomate", 2, 0, 7), ("Cenoura", 1, 0, 0), ("Couve", 0, 1, 10)])
+        self.assertEqual([p["nome_produto"] for p in painel["alertas_falta"]], ["Cenoura"])
+        self.assertEqual([p["nome_produto"] for p in painel["alertas_sobra"]], ["Couve"])
+        self.assertEqual(painel["semana_atual"], {"pedidos": 4, "colhido": 20, "separado": 3})
+        self.assertEqual(painel["semana_anterior"], {"pedidos": 0, "colhido": 504, "separado": 0})
+        # A assinante não vê o painel: ele mostra as cestas e as marcações de todas.
+        app.dependency_overrides[obter_usuario_atual] = lambda: Usuario(id=ana, nome="Ana", tipo="assinante")
+        self.assertEqual(self.cliente.get(f"/painel?semana={semana}").status_code, 403)
 
 
 # Estes testes validam SQL e HTTP sem conexão com o banco.

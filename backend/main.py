@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from configuracao import ORIGEM_FRONTEND
-from rotas import (autenticacao, cestas, estoques, pre_preenchimento, preferencias, produtos,
+from rotas import (autenticacao, cestas, estoques, painel, pre_preenchimento, preferencias, produtos,
                    produtos_separados, usuarios)
 
 # O ponto de entrada somente cria o aplicativo, configura CORS e liga os routers.
@@ -21,3 +21,4 @@ app.include_router(produtos_separados.router)
 app.include_router(estoques.router)
 app.include_router(produtos.router)
 app.include_router(preferencias.router)
+app.include_router(painel.router)

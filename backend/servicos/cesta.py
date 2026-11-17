@@ -19,16 +19,21 @@ def segunda_da_semana(data):
     return data - timedelta(days=data.weekday())
 
 
-# Quanto da colheita da semana já está comprometido com as cestas aprovadas (em separação).
+# As cestas que tiram itens da colheita: as aprovadas (em separação) e as já fechadas (concluídas).
+# A concluída continua contando: os itens dela saíram do estoque e não voltam a ficar livres.
+RESERVAM = {"em_separacao", "concluida"}
+
+
+# Quanto da colheita da semana já está comprometido com as cestas aprovadas ou concluídas.
 # O pedido não confere o estoque: o produtor decide na aprovação, e o estoque só trava na separação.
-# Cada cesta aprovada reserva o limite inteiro do tamanho dela, e a conta serve de resumo para o produtor.
+# Cada uma reserva o limite inteiro do tamanho dela, e a conta serve de resumo para o produtor.
 # Fica aqui, e não no serviço do estoque, porque usa os LIMITES; o servicos/estoque.py importa daqui,
 # e assim os dois não se importam em círculo.
 def itens_livres_na_semana(sessao, semana):
     semana = segunda_da_semana(semana)
     colhido = sum(item.quantidade for item in repositorio_estoque.listar_da_semana(sessao, semana))
     reservado = sum(LIMITES[cesta.tamanho] for cesta in repositorio_cesta.listar_da_semana(sessao, semana)
-                    if cesta.situacao == "em_separacao")
+                    if cesta.situacao in RESERVAM)
     return colhido, reservado, colhido - reservado
 
 

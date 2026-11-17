@@ -357,3 +357,63 @@ dialog{border:1px solid #dce6d4;border-radius:22px;padding:30px 33px 31px;width:
 
 /* Minhas cestas: o botão de limpar os filtros fica alinhado aos campos, sem cara de botão */
 .filter-clear{border:0;background:transparent;padding:0 4px;align-self:center;font-size:13px;white-space:nowrap}
+
+/* Painel do produtor: indicadores no alto e cartões em grade. As cores repetem as do estoque e das situações. */
+.dash-loading{color:var(--text-secondary);padding:24px 0}
+.kpi-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin:8px 0 20px}
+.kpi-tile{background:#fff;border:1px solid #e5e8df;border-radius:18px;padding:18px 20px;box-shadow:var(--shadow-card);display:flex;flex-direction:column;gap:6px;min-width:0}
+.kpi-label{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary)}
+.kpi-value{font-family:var(--font-heading);font-size:38px;line-height:1.05;color:#2b4523}
+.kpi-value small{font-family:var(--font-body);font-size:14px;font-weight:700;color:var(--text-secondary)}
+.kpi-note,.kpi-delta{font-size:13px;color:var(--text-secondary)}
+.kpi-delta.up{color:#2d6b1f}
+.kpi-delta.down{color:var(--brand-brown)}
+.dash-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;align-items:start}
+.dash-card-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.dash-card-head .entry-title{margin:0;font-size:22px}
+.dash-card-head .text-link{margin-left:0}
+.dash-muted{font-size:13px;color:var(--text-secondary)}
+.dash-gap{margin-top:14px}
+.dash-list{list-style:none;margin:0;padding:0}
+.dash-list li{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;font-size:14px}
+.dash-list li+li{border-top:1px solid #eef0e9}
+.dash-list .status-badge{margin-left:0}
+.dash-list li>span:first-child{display:flex;flex-direction:column;min-width:0}
+.dash-list small{color:var(--text-secondary);font-size:12px}
+.dash-list strong{color:#2b4523}
+.dash-stack{display:flex;gap:2px;height:14px;margin-bottom:8px}
+.dash-stack span{min-width:6px}
+.dash-stack span:first-child{border-radius:4px 0 0 4px}
+.dash-stack span:last-child{border-radius:0 4px 4px 0}
+.dash-stack span:only-child{border-radius:4px}
+.dash-stack .status-ordered{background:#d9b75a}
+.dash-stack .status-progress{background:#6fa64a}
+.dash-stack .status-done{background:#2d6b1f}
+.dash-stack .status-refused{background:#c4574a}
+.dash-stack .status-cancelled{background:#a9ada3}
+.dash-alerts{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.dash-alerts li{display:flex;gap:12px;align-items:flex-start;border-radius:12px;padding:12px 14px;font-size:14px}
+.dash-alerts li>span{display:flex;flex-direction:column;gap:2px}
+.dash-alerts small{font-size:12px;color:var(--text-secondary)}
+.dash-alerts .icon{width:20px;height:20px;flex:none;margin-top:1px}
+.alert-short{background:#fff1ef;border:1px solid #eec7c1}
+.alert-short .icon,.alert-short strong{color:var(--feedback-error)}
+.alert-extra{background:#fff8ed;border:1px solid #efdcbc}
+.alert-extra .icon,.alert-extra strong{color:var(--feedback-warning)}
+.dash-bar{display:block;height:4px;border-radius:4px;background:#eef0e9;margin-top:6px;max-width:220px}
+.dash-bar span{display:block;height:100%;border-radius:4px;background:#6fa64a}
+.dash-legend{display:flex;gap:18px;font-size:13px;color:var(--text-secondary);margin-bottom:8px}
+.dash-legend span{display:inline-flex;align-items:center;gap:6px}
+.dash-legend i{width:12px;height:12px;border-radius:3px;display:inline-block}
+.swatch-want,.bar-want{background:#3d8a1f}
+.swatch-not,.bar-not{background:#c4774a}
+.dash-prefs{width:100%;border-collapse:collapse;font-size:14px;table-layout:fixed}
+.dash-prefs th{text-align:left;font-weight:700;color:var(--text-primary);padding:7px 10px 7px 0;width:32%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dash-prefs td{padding:7px 0}
+.dash-pref-bar{display:flex;align-items:center;gap:8px;height:16px}
+.dash-pref-bar>span:first-child{height:10px;border-radius:0 4px 4px 0;flex:none;max-width:calc(100% - 30px)}
+.pref-count{font-size:12px;color:var(--text-secondary)}
+.dash-prefs tr+tr th,.dash-prefs tr+tr td{border-top:1px solid #eef0e9}
+.dash-card-head .text-link{background:none;border:0;padding:0;min-height:44px}
+@media (max-width:940px){.kpi-row{grid-template-columns:repeat(2,minmax(0,1fr))}.dash-grid{grid-template-columns:1fr}}
+@media (max-width:420px){.kpi-row{grid-template-columns:1fr}.kpi-value{font-size:32px}}

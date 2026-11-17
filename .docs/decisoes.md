@@ -134,7 +134,7 @@
 - Onde está: `modelos/estoque.py`, `servicos/estoque.py`, `rotas/estoques.py`, migration `9ba02dc0bbc4`.
 
 ## Cada cesta aprovada reserva o limite inteiro do tamanho (substitui a reserva no pedido)
-- Decisão: itens livres = total colhido na semana − soma dos limites das cestas `em_separacao`. É só um resumo para o produtor: nada recusa o pedido nem a aprovação por causa dele.
+- Decisão: itens livres = total colhido na semana − soma dos limites das cestas `em_separacao` e `concluida`. Até 2026-11-16 só contavam as `em_separacao`, e os itens de uma cesta concluída voltavam a aparecer como livres (e a liberar tamanhos na janela de pedido). É só um resumo para o produtor: nada recusa o pedido nem a aprovação por causa dele.
 - Por quê: antes, o pedido era recusado sem estoque, e a assinante ficava sem poder pedir antes de a colheita ser lançada. Agora o produtor decide na aprovação.
 - Ficou de fora: recusar a aprovação sem estoque, e liberar a reserva de uma cesta que não é concluída.
 - Onde está: `servicos/cesta.py` (`itens_livres_na_semana`).
@@ -309,3 +309,9 @@
 - Por quê: o banco agora é Postgres, onde um valor novo de `ENUM` só entra por `ALTER TYPE`, e o Alembic não tem operação para isso. O `alter_column` não muda o tipo que já existe.
 - Ficou de fora: recriar o tipo e a coluna, e o `downgrade` (o Postgres não retira valor de `ENUM`).
 - Onde está: `migracoes/versions/0005_cesta_cancelada.py`.
+
+## O painel do produtor é a tela inicial, com um endpoint só
+- Decisão: o produtor entra no **Painel** (`tela === 'inicio'`), e não mais na separação. A tela faz um `GET /painel?semana=`, protegido pela permissão nova `painel:ver`, e o back devolve as contas prontas (`servicos/painel.da_semana`).
+- Por quê: juntar estoque, cestas, separados e preferências no front pediria várias buscas e repetiria as regras dos limites. No back, as contas usam os mesmos `LIMITES` e os mesmos `listar_da_semana` do resto do sistema. As preferências de todas as assinantes só aparecem ao produtor, por isso a permissão própria.
+- Ficou de fora: receita e preços, datas de entrega e quilos (não existem no banco), histórico de várias semanas em gráfico e a recorrência das assinantes.
+- Onde está: `rotas/painel.py`, `servicos/painel.py`, `esquemas/painel.py`, `seguranca.py` (`painel:ver`), `Painel` em `frontend/src/App.jsx`, e o teste `test_painel_do_produtor`.

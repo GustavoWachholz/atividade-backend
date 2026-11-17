@@ -271,6 +271,7 @@ const MENU_DO_PERFIL = {
     { tela: 'preferencias', rotulo: 'Preferências' },
   ],
   produtor: [
+    { tela: 'inicio', rotulo: 'Painel' },
     { rotulo: 'Cestas', itens: [{ tela: 'separacao', rotulo: 'A separação' }] },
     { rotulo: 'Cadastros', itens: [{ tela: 'estoque', rotulo: 'O estoque' }, { tela: 'produtos', rotulo: 'Os produtos' }] },
   ],
@@ -1429,6 +1430,238 @@ function Separacao({ token, abrirFechamento, aoExpirar, versao }) {
   </section>;
 }
 
+// Tela inicial do produtor: o painel da semana, montado com um GET /painel só.
+// As contas (previstos, livres, quantas pedidas cabem, alertas) vêm prontas do back.
+function buscarPainel(token, semanaISO, aoExpirar) {
+  return fetch(`${URL_DA_API}/painel?semana=${semanaISO}`, {
+    headers: { Authorization: 'Bearer ' + token }
+  }).then((res) => {
+    if (res.status === 401) { aoExpirar(); throw new Error('Sua sessão expirou. Entre de novo.'); }
+    if (!res.ok) throw new Error('Não foi possível carregar o painel da semana.');
+    return res.json();
+  });
+}
+
+// "+3 que na semana anterior", "-2 que na semana anterior" ou "igual à semana anterior".
+function Variacao({ atual, anterior }) {
+  const diferenca = atual - anterior;
+  if (diferenca === 0) return <span className="kpi-delta">igual à semana anterior</span>;
+  return <span className={`kpi-delta ${diferenca > 0 ? 'up' : 'down'}`}>
+    {diferenca > 0 ? '▲' : '▼'} {Math.abs(diferenca)} {diferenca > 0 ? 'a mais' : 'a menos'} que na semana anterior
+  </span>;
+}
+
+function Indicador({ rotulo, valor, unidade, children }) {
+  return <div className="kpi-tile">
+    <span className="kpi-label">{rotulo}</span>
+    <strong className="kpi-value">{valor}<small>{unidade}</small></strong>
+    {children}
+  </div>;
+}
+
+// "há 2 dias", "hoje". criado_em vem sem fuso (UTC no banco); só o dia importa aqui.
+function textoDaEspera(criadoEm) {
+  const dias = Math.floor((Date.now() - new Date(criadoEm + 'Z').getTime()) / 86400000);
+  if (dias <= 0) return 'pedida hoje';
+  return dias === 1 ? 'pedida há 1 dia' : `pedida há ${dias} dias`;
+}
+
+const ORDEM_DAS_SITUACOES = ['pedida', 'em_separacao', 'concluida', 'recusada', 'cancelada'];
+
+function Painel({ token, aoExpirar, versao, navegar }) {
+  const [semana, setSemana] = useState(() => dataISO(segundaDaSemana()));
+  const [painel, setPainel] = useState(null);
+  const [erro, setErro] = useState('');
+
+  useEffect(() => {
+    // ativo evita que a resposta de uma semana antiga cubra a semana que o produtor acabou de escolher
+    let ativo = true;
+    setErro('');
+    buscarPainel(token, semana, aoExpirar)
+      .then((dados) => { if (ativo) setPainel(dados); })
+      .catch((err) => { if (ativo) setErro(err.message); });
+    return () => { ativo = false; };
+  }, [token, semana, versao]);
+
+  const carregando = !painel || painel.semana !== semana;
+
+  return <section className="container workspace page" aria-labelledby="titulo-painel">
+    <div className="workspace-heading">
+      <div>
+        <span className="section-overline">ÁREA DO PRODUTOR</span>
+        <h1 id="titulo-painel">O painel da <span>semana</span></h1>
+        <p>O que foi colhido, o que foi pedido e o que vai sair da horta, num lugar só.</p>
+      </div>
+    </div>
+
+    <SeletorDeSemana semana={semana} setSemana={setSemana} />
+
+    {erro && <div className="dialog-error" role="alert">{erro}</div>}
+
+    {carregando ? (!erro && <p className="dash-loading" aria-live="polite">Carregando o painel...</p>) : <ConteudoDoPainel painel={painel} navegar={navegar} />}
+  </section>;
+}
+
+function ConteudoDoPainel({ painel, navegar }) {
+  const { pedidos, semana_atual: atual, semana_anterior: anterior } = painel;
+  const totalDePedidos = ORDEM_DAS_SITUACOES.reduce((soma, s) => soma + pedidos[s], 0);
+  const pendentes = pedidos.pedida;
+  const maiorMarca = Math.max(1, ...painel.populares.map((p) => Math.max(p.quer, p.nao_quer)));
+  const populares = painel.populares.slice(0, 8);
+
+  return <>
+    <div className="kpi-row">
+      <Indicador rotulo="Itens previstos para sair" valor={painel.itens_previstos} unidade=" itens">
+        <span className="kpi-note">
+          {painel.itens_das_pedidas > 0
+            ? `+${painel.itens_das_pedidas} se aprovar todas as pedidas`
+            : 'cestas em separação e concluídas'}
+        </span>
+      </Indicador>
+      <Indicador rotulo="Livres no estoque" valor={painel.itens_livres} unidade=" itens">
+        <span className="kpi-note">
+          {pendentes === 0 ? 'nenhum pedido esperando aprovação'
+            : `dá para aprovar ${painel.pedidas_que_cabem} de ${pendentes} ${pendentes === 1 ? 'pedida' : 'pedidas'}`}
+        </span>
+      </Indicador>
+      <Indicador rotulo="Colhido na semana" valor={painel.total_colhido} unidade=" itens">
+        <Variacao atual={atual.colhido} anterior={anterior.colhido} />
+      </Indicador>
+      <Indicador rotulo="Pedidos na semana" valor={atual.pedidos} unidade={atual.pedidos === 1 ? ' cesta' : ' cestas'}>
+        <Variacao atual={atual.pedidos} anterior={anterior.pedidos} />
+      </Indicador>
+    </div>
+
+    <div className="dash-grid">
+      <article className="producer-entry dash-card">
+        <header className="dash-card-head">
+          <h2 className="entry-title">Pedidos por situação</h2>
+          <button type="button" className="text-link" onClick={() => navegar('separacao')}>Abrir a separação <Icone nome="arrow" /></button>
+        </header>
+        {totalDePedidos === 0 ? <p className="entry-empty">Nenhuma cesta pedida nesta semana.</p> : <>
+          <div className="dash-stack" role="img" aria-label={ORDEM_DAS_SITUACOES.map((s) => `${SITUACOES[s].nome}: ${pedidos[s]}`).join(', ')}>
+            {ORDEM_DAS_SITUACOES.filter((s) => pedidos[s] > 0).map((s) => (
+              <span key={s} className={SITUACOES[s].classe} style={{ flexGrow: pedidos[s] }} title={`${SITUACOES[s].nome}: ${pedidos[s]}`} />
+            ))}
+          </div>
+          <ul className="dash-list">
+            {ORDEM_DAS_SITUACOES.map((s) => <li key={s}>
+              <SituacaoDaCesta situacao={s} />
+              <strong>{pedidos[s]}</strong>
+            </li>)}
+          </ul>
+        </>}
+      </article>
+
+      <article className="producer-entry dash-card">
+        <header className="dash-card-head">
+          <h2 className="entry-title">Esperando aprovação</h2>
+          {pendentes > painel.fila.length && <span className="dash-muted">mostrando {painel.fila.length} de {pendentes}</span>}
+        </header>
+        {painel.fila.length === 0 ? <p className="entry-empty">Nenhum pedido esperando. Os pedidos novos aparecem aqui, dos mais antigos para os mais novos.</p> : (
+          <ol className="dash-list dash-queue">
+            {painel.fila.map((cesta) => <li key={cesta.id}>
+              <span><strong>{cesta.nome_assinante}</strong><small>Cesta {tamanhos[cesta.tamanho].nome.toLowerCase()} · {tamanhos[cesta.tamanho].limite} itens</small></span>
+              <span className="dash-muted">{textoDaEspera(cesta.criado_em)}</span>
+            </li>)}
+          </ol>
+        )}
+      </article>
+
+      <article className="producer-entry dash-card">
+        <header className="dash-card-head">
+          <h2 className="entry-title">Andamento da separação</h2>
+        </header>
+        {painel.itens_previstos === 0 ? <p className="entry-empty">Nenhuma cesta aprovada nesta semana ainda.</p> : <>
+          <div className="entry-progress-header"><span>Itens separados</span><span className="remaining">{painel.itens_separados} / {painel.itens_previstos}</span></div>
+          <progress value={painel.itens_separados} max={painel.itens_previstos} aria-label={`${painel.itens_separados} de ${painel.itens_previstos} itens separados`} />
+          {painel.cestas_em_separacao.length === 0 ? <p className="dash-muted dash-gap">Todas as cestas aprovadas já foram concluídas.</p> : (
+            <ul className="dash-list dash-gap">
+              {painel.cestas_em_separacao.map((cesta) => {
+                const faltam = cesta.limite_itens - cesta.quantidade_ocupada;
+                return <li key={cesta.id}>
+                  <span><strong>{cesta.nome_assinante}</strong><small>Cesta {tamanhos[cesta.tamanho].nome.toLowerCase()}</small></span>
+                  <span className="dash-muted">{faltam === 0 ? 'cheia, falta concluir' : faltam === 1 ? 'falta 1 item' : `faltam ${faltam} itens`}</span>
+                </li>;
+              })}
+            </ul>
+          )}
+        </>}
+      </article>
+
+      <article className="producer-entry dash-card">
+        <header className="dash-card-head">
+          <h2 className="entry-title">Alertas da semana</h2>
+        </header>
+        {painel.alertas_falta.length === 0 && painel.alertas_sobra.length === 0 ? (
+          <p className="entry-empty">Nada a avisar. O estoque cobre o que as assinantes da semana marcaram como Quero.</p>
+        ) : (
+          <ul className="dash-alerts">
+            {painel.alertas_falta.map((p) => <li key={`falta-${p.produto_id}`} className="alert-short">
+              <Icone nome="info" />
+              <span><strong>{p.nome_produto} pode faltar</strong>
+                <small>{p.quer} {p.quer === 1 ? 'assinante quer' : 'assinantes querem'}, {p.colhido_na_semana ? `${p.disponivel} disponíveis` : 'não foi colhido nesta semana'}</small></span>
+            </li>)}
+            {painel.alertas_sobra.map((p) => <li key={`sobra-${p.produto_id}`} className="alert-extra">
+              <Icone nome="leaf" />
+              <span><strong>{p.nome_produto} pode sobrar</strong>
+                <small>{p.disponivel} disponíveis · {p.nao_quer} não {p.nao_quer === 1 ? 'quer' : 'querem'}, {p.quer} {p.quer === 1 ? 'quer' : 'querem'}</small></span>
+            </li>)}
+          </ul>
+        )}
+      </article>
+
+      <article className="producer-entry dash-card">
+        <header className="dash-card-head">
+          <h2 className="entry-title">Estoque da semana</h2>
+          <button type="button" className="text-link" onClick={() => navegar('estoque')}>Registrar colheita <Icone nome="arrow" /></button>
+        </header>
+        {painel.estoque.length === 0 ? <p className="entry-empty">Nada colhido nesta semana ainda.</p> : (
+          <table className="stock-table dash-stock">
+            <thead><tr><th>Produto</th><th>Colhido</th><th>Separado</th><th>Disponível</th></tr></thead>
+            <tbody>
+              {painel.estoque.map((item) => <tr key={item.produto_id}>
+                <td>
+                  {item.nome_produto}
+                  <span className="dash-bar" aria-hidden="true"><span style={{ width: `${item.colhido ? (item.separado / item.colhido) * 100 : 0}%` }} /></span>
+                </td>
+                <td>{item.colhido}</td>
+                <td>{item.separado}</td>
+                <td><strong>{item.disponivel}</strong></td>
+              </tr>)}
+            </tbody>
+          </table>
+        )}
+      </article>
+
+      <article className="producer-entry dash-card">
+        <header className="dash-card-head">
+          <h2 className="entry-title">O que as assinantes querem</h2>
+          <span className="dash-muted">{painel.assinantes_na_semana} {painel.assinantes_na_semana === 1 ? 'assinante' : 'assinantes'} com cesta na semana</span>
+        </header>
+        {populares.length === 0 ? <p className="entry-empty">As assinantes desta semana ainda não marcaram preferências.</p> : <>
+          <div className="dash-legend" aria-hidden="true">
+            <span><i className="swatch-want" /> Quero</span>
+            <span><i className="swatch-not" /> Não quero</span>
+          </div>
+          <table className="dash-prefs">
+            <thead className="sr-only"><tr><th>Produto</th><th>Quero e Não quero</th></tr></thead>
+            <tbody>
+              {populares.map((p) => <tr key={p.produto_id}>
+                <th scope="row">{p.nome_produto}</th>
+                <td>
+                  <div className="dash-pref-bar"><span className="bar-want" style={{ width: `${(p.quer / maiorMarca) * 100}%` }} title={`${p.nome_produto}: ${p.quer} Quero`} /><span className="pref-count">{p.quer}</span></div>
+                  <div className="dash-pref-bar"><span className="bar-not" style={{ width: `${(p.nao_quer / maiorMarca) * 100}%` }} title={`${p.nome_produto}: ${p.nao_quer} Não quero`} /><span className="pref-count">{p.nao_quer}</span></div>
+                </td>
+              </tr>)}
+            </tbody>
+          </table>
+        </>}
+      </article>
+    </div>
+  </>;
+}
+
 // Tela do estoque do produtor: cadastra o que foi colhido na semana e mostra o que sobrou de cada produto.
 // Começa na semana atual; as setas trocam de semana para cadastrar a colheita da próxima.
 // O produto vem do catálogo (só os ativos); o produtor não digita mais o nome a cada semana.
@@ -1533,7 +1766,7 @@ function Estoque({ token, aoExpirar, versao, aoCadastrar, navegar }) {
         {carregando || !resumo ? <p>Carregando o estoque...</p> : <>
           <div className="order-summary stock-summary">
             <div><span>Colhido na semana</span><strong>{resumo.total_colhido} itens</strong></div>
-            <div><span>Reservado pelas cestas aprovadas</span><strong>{resumo.total_reservado} itens</strong></div>
+            <div><span>Reservado pelas cestas aprovadas e concluídas</span><strong>{resumo.total_reservado} itens</strong></div>
             <div><span>Livres para aprovar mais pedidos</span><strong>{resumo.itens_livres} itens</strong></div>
           </div>
           {resumo.itens.length ? (
@@ -1699,6 +1932,7 @@ function Rodape({ navegar, usuario }) {
           <button type="button" onClick={() => navegar('cestas')}>Minhas cestas</button>
           <button type="button" onClick={() => navegar('preferencias')}>Preferências</button>
         </> : <>
+          <button type="button" onClick={() => navegar('inicio')}>Painel</button>
           <button type="button" onClick={() => navegar('separacao')}>A separação</button>
           <button type="button" onClick={() => navegar('estoque')}>O estoque</button>
           <button type="button" onClick={() => navegar('produtos')}>Os produtos</button>
@@ -2026,9 +2260,8 @@ export default function App() {
       })
       .then((dados) => {
         setUsuario(dados);
-        // Produtor entra diretamente na separação, e a assinante no início
-        if (dados.tipo === 'produtor') setTela('separacao');
-        else setTela('inicio');
+        // Os dois entram no início: para o produtor, o início é o painel da semana
+        setTela('inicio');
       })
       .catch(() => {
         localStorage.removeItem('token');
@@ -2151,6 +2384,8 @@ export default function App() {
             aoCadastrar={(mensagem) => { setVersao((atual) => atual + 1); setAviso(mensagem); }} />
         ) : tela === 'produtos' ? (
           <Produtos token={token} aoExpirar={sair} aoAvisar={setAviso} />
+        ) : tela === 'inicio' ? (
+          <Painel token={token} aoExpirar={sair} versao={versao} navegar={setTela} />
         ) : (
           <Separacao token={token} abrirFechamento={setCestaEmFechamento} aoExpirar={sair} versao={versao} />
         )

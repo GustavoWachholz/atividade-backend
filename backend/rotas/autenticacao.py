@@ -133,4 +133,11 @@ def exigir_editar_preferencias(usuario=Depends(obter_usuario_atual)):
     if not tem_permissao(usuario, "preferencias:editar"):
         raise HTTPException(status_code=403, detail="Seu grupo não tem preferências de cesta")
     return usuario
+
+
+# GET /painel: só o produtor vê o resumo da semana, porque ele mostra as cestas e as marcações de todas.
+def exigir_ver_painel(usuario=Depends(obter_usuario_atual)):
+    if not tem_permissao(usuario, "painel:ver"):
+        raise HTTPException(status_code=403, detail="Seu grupo não pode ver o painel do produtor")
+    return usuario
 # ─── [FIM NOVO · grupos] ─────────────────────────────────────────────────────────────────
